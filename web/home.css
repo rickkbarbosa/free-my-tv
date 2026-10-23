@@ -561,7 +561,9 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 #placeholder, #placeholder * { pointer-events: none; }
 #placeholder .ghost { position: absolute; top: 262px; height: 442px; border-radius: 18px; background: rgba(255, 255, 255, 0.34); box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.6); }
 .night #placeholder .ghost { background: rgba(255, 255, 255, 0.08); box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.12); }
-#placeholder .note { position: absolute; left: 80px; top: 300px; width: 1060px; }
+/* The clock keeps its place above; the note sits under it, never over it. */
+#placeholder .note { position: absolute; left: 80px; top: 576px; width: 1320px; }
+body.picks-loading #clock { display: none; }
 #placeholder .note .n-title { font-size: 38px; font-weight: 700; color: #1D1D1F; letter-spacing: -0.01em; }
 #placeholder .note .n-body { margin-top: 16px; font-size: 26px; font-weight: 500; line-height: 1.45; color: #6E6E73; }
 #placeholder .note .n-hint { margin-top: 22px; font-size: 23px; font-weight: 600; color: #1D1D1F; }

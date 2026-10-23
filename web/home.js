@@ -267,9 +267,10 @@
     var holder = $('placeholder');
     holder.innerHTML = '';
     setClass(holder, 'on', !has);
-    if (has) return;
+    if (has) { setClass(body, 'picks-loading', false); return; }
     var error = Data.recsError ? Data.recsError() : '';
     if (Data.hasKey() && !error) {
+      setClass(body, 'picks-loading', true);
       var rects = [[80, 1040], [1160, 320], [1520, 320]];
       for (var i = 0; i < 3; i++) {
         var ghost = el('div', 'ghost', holder);
@@ -278,6 +279,7 @@
       }
       return;
     }
+    setClass(body, 'picks-loading', false);
     var note = el('div', 'note', holder);
     if (!Data.hasKey()) {
       el('div', 'n-title', note, tr('No picks yet'));
