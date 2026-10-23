@@ -166,6 +166,7 @@ var TV = (function () {
   }
 
   var self = 'io.freemytv';
+  var appSource = '', pairing = '';   // what diagnostics shows: where the app list came from, and whether the TV allowed it
   if (webos && window.PalmSystem && window.PalmSystem.identifier) self = window.PalmSystem.identifier.split(' ')[0];
   if (samsung) {
     try { self = window.tizen.application.getCurrentApplication().appInfo.id; } catch (e) {}
@@ -279,8 +280,9 @@ var TV = (function () {
 
     /** Installed apps, as the TV's launcher lists them: [{id, title, icon, color}]. */
     apps: function (done) {
-      if (samsung) { samsungApps(done); return; }
+      if (samsung) { appSource = 'samsung'; samsungApps(done); return; }
       if (!webos) {
+        appSource = 'sample';
         done(SAMPLE.map(function (s) { return {id: s[0], title: s[1], icon: '', color: s[2]}; }));
         return;
       }
@@ -295,18 +297,21 @@ var TV = (function () {
         return out;
       }
       luna('luna://com.webos.applicationManager/listLaunchPoints', {}, function (res) {
-        if (res) { done(list(res)); return; }
+        if (res) { appSource = 'launchPoints'; pairing = 'granted'; done(list(res)); return; }
         // Denied to Developer Mode apps (webOS 6 and newer): once the TV has allowed the remote control API, it lists
         // every app with its icon; until then, the known apps the TV says it has, while the TV asks once (an answer
         // only counts from the next load on, and a "no" isn't asked again).
         var paired = false, refused = false;
         try { paired = !!localStorage.getItem(SSAP_KEY); refused = !!localStorage.getItem(SSAP_REFUSED); } catch (e) {}
+        pairing = refused ? 'refused' : paired ? 'paired' : 'asking';
         if (paired) {
           ssap('com.webos.applicationManager/listLaunchPoints', function (res2) {
-            if (res2) done(list(res2)); else knownApps(done);
+            if (res2) { appSource = 'ssap'; done(list(res2)); }
+            else { appSource = 'known'; knownApps(done); }
           });
           return;
         }
+        appSource = 'known';
         knownApps(done);
         if (!refused) ssap('com.webos.applicationManager/listLaunchPoints', function () {});
       });
@@ -362,6 +367,30 @@ var TV = (function () {
       else this.launch('com.palm.app.settings', null, done);
     },
 
+    /** Opens a web page in the TV's browser; done(ok). */
+    open: function (url, done) {
+      if (!url) { if (done) done(false); return; }
+      if (samsung) {
+        try {
+          var data = new window.tizen.ApplicationControlData('http://tizen.org/appcontrol/data/url/url', url);
+          var control = new window.tizen.ApplicationControl('http://tizen.org/appcontrol/operation/view',
+            null, null, null, [data]);
+          window.tizen.application.launchAppControl(control, null,
+            function () { if (done) done(true); }, function () { if (done) done(false); });
+        } catch (e) {
+          if (done) done(false);
+        }
+        return;
+      }
+      if (!webos) {
+        try { window.open(url, '_blank'); } catch (e) {}
+        if (done) setTimeout(function () { done(true); }, 0);
+        return;
+      }
+      luna('luna://com.webos.applicationManager/launch',
+        {id: 'com.webos.app.browser', params: {target: url}}, function (res) { if (done) done(!!res); });
+    },
+
     /** Back on the first screen: back to wherever the person came from. */
     back: function () {
       if (samsung) {
@@ -378,6 +407,9 @@ var TV = (function () {
       }
       try { return Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch (e) { return ''; }
     },
+
+    /** Where the app list came from, for the diagnostics screen. */
+    status: function () { return {source: appSource, pairing: pairing}; },
 
     /** Key codes: the arrows, OK and the TV's Back (LG 461, Samsung 10009). */
     keys: {left: 37, up: 38, right: 39, down: 40, ok: 13, back: samsung ? 10009 : 461}

@@ -100,6 +100,25 @@ You need a Samsung TV from 2017 or newer (Tizen 3+) and a computer on the same W
 
 This build takes your city from the TV's time zone. For your exact city and the trending picks, build it with your own `config.properties` and [TMDB key](#the-tmdb-key): open the folder in Claude Code and say *"Install Free My TV on my Samsung TV at 192.168.1.50. I live in Lisbon."* It sets up Samsung's tools, and on 2023 and newer TVs you sign in to your Samsung account in the browser to make the certificate. Your signed build installs with `python3 tizen/install.py 192.168.1.50`, which needs only Python: no Tizen Studio, and no Rosetta on Apple Silicon Macs.
 
+## News on the home screen (this build)
+
+The watchdog build adds headlines and Brazil's severe-weather alerts to the LG and Samsung home screens.
+
+- **Weather alert.** INMET's alerts that cover your city, as a strip at the top. Tap it (Magic Remote) or open the
+  sheet to see the notice. Set the city in *Home Settings › City*.
+- **Headlines.** *Home Settings › News* turns them on; the drawer then gets a **News** entry with 8–12 headlines.
+  OK opens the story in the TV's browser.
+- **Feeds.** The default list is Manual do Usuário, ESPN and TabNews — the ones that answer a cross-origin request
+  from a TV. `rss_feeds=` in `config.properties` replaces it: most publishers don't send
+  `Access-Control-Allow-Origin`, so point those at a small proxy of your own (a Cloudflare Worker that fetches the
+  feed and returns it with `Access-Control-Allow-Origin: *`).
+- **TMDB key and city on the TV.** *Home Settings › TMDB key* and *› City* open the TV's own keyboard, so a generic
+  build works without rebuilding: type the key (or search the city), and the app saves it and restarts.
+- **Diagnostics.** *Home Settings › Diagnostics* shows where the app list came from (launch points, the paired
+  remote API, or the built-in list), the TMDB and feed status, and the alert found for the city.
+
+Everything else — the picks, the shelf, the drawer, the screensaver — is upstream Free My TV.
+
 ## Settings
 
 The first values come from `config.properties`, created by the first build (Google TV, LG and Samsung use the same file). Most of them can also be changed on the TV, in *Free My TV* → *Home Settings*, and the TV's choice wins:

@@ -22,11 +22,14 @@ var Place = (function () {
   }
 
   var tz = zone(TV.zone()), set = CONFIG.latitude !== '' && CONFIG.latitude !== undefined;
-  var country = (CONFIG.tmdbRegion || (tz ? tz.country : '') || 'US').toUpperCase();
+  var saved = {};
+  try { saved = JSON.parse(localStorage.getItem('fmtv.prefs')) || {}; } catch (e) {}
+  if (saved.lat !== undefined && saved.lon !== undefined) set = true;
+  var country = (saved.region || CONFIG.tmdbRegion || (tz ? tz.country : '') || 'US').toUpperCase();
   return {
-    lat: set ? CONFIG.latitude : tz ? tz.lat : '40.7128',
-    lon: set ? CONFIG.longitude : tz ? tz.lon : '-74.0060',
-    city: CONFIG.city || (!set && tz ? tz.name : ''),
+    lat: saved.lat !== undefined ? saved.lat : set ? CONFIG.latitude : tz ? tz.lat : '40.7128',
+    lon: saved.lon !== undefined ? saved.lon : set ? CONFIG.longitude : tz ? tz.lon : '-74.0060',
+    city: saved.cityName || CONFIG.city || (!set && tz ? tz.name : ''),
     country: country,
     currency: (CONFIG.currency || (country === 'BR' ? 'BRL' : EURO.test(country) ? 'EUR' : 'USD')).toUpperCase(),
     /** Fahrenheit for TVs in the US (by their time zone, or their language when it doesn't tell). */
@@ -43,6 +46,7 @@ var Prefs = (function () {
   function pick(name, fallback) { return v[name] === undefined ? fallback : v[name]; }
   return {
     version: 0,
+    get: function (name, fallback) { return pick(name, fallback); },
     language: function () { return pick('language', CONFIG.language || 'auto'); },
     temperature: function () { return pick('temperature', CONFIG.temperature || 'auto'); },
     theme: function () { return pick('theme', 'auto'); },
@@ -209,7 +213,7 @@ var Data = (function () {
 
   // MARK: - Picks (TMDB)
 
-  var KEY = (CONFIG.tmdbKey || '').trim();
+  var KEY = String(Prefs.get('tmdbKey', CONFIG.tmdbKey) || '').trim();
   var REGION = Place.country;
   var API = 'https://api.themoviedb.org/3';
 
@@ -361,6 +365,8 @@ var Data = (function () {
       }
       if (p.service && p.app) parts.push(p.service);
       p.meta = parts.join(' · ');
+      p.overview = String(o.overview || '').replace(/\s+/g, ' ').replace(/^\s+|\s+$/g, '');
+      p.rating = o.vote_average > 0 ? Math.round(o.vote_average * 10) / 10 : 0;
       title(p, o, function () {
         p.detailed = true;
         done(null);
@@ -522,6 +528,8 @@ var Data = (function () {
     get pricesAt() { return pricesAt; },
     activeCoins: activeCoins,
     hasKey: function () { return !!KEY; },
+    keyHint: function () { return KEY ? '•••• ' + KEY.slice(-4) : ''; },
+    loading: function () { return fetchingRecs; },
     recsError: function () { return recsError; },
     picks: now,
     showcase: all,

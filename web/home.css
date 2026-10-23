@@ -449,7 +449,7 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 .cell.focus .face { -webkit-transform: scale(1.08); transform: scale(1.08); box-shadow: 0 16px 34px rgba(0, 0, 0, 0.55), inset 0 0 0 2px rgba(255, 255, 255, 0.4); }
 .cell.focus .label { color: #FFF; }
 
-#settings .box, #shelfedit .box, #langpick .box {
+#settings .box, #shelfedit .box, #langpick .box, #news .box, #detail .box, #input .box, #diag .box {
   position: absolute;
   left: 560px;
   top: 150px;
@@ -526,3 +526,76 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 
 /* The Magic Remote's pointer: no text selection, no outlines. */
 * { -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; }
+
+/* MARK: - Free My TV additions: weather alert, headlines, the title sheet, and the on-TV settings that need an input */
+
+#alert {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 46px;
+  line-height: 46px;
+  padding: 0 76px;
+  border-radius: 0;
+  font-size: 21px;
+  font-weight: 600;
+  color: #1D1D1F;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.12), inset 0 0 0 1px rgba(255, 255, 255, 0.7);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0;
+  visibility: hidden;
+  -webkit-transition: opacity 0.3s;
+  transition: opacity 0.3s;
+}
+#alert.on { opacity: 1; visibility: visible; }
+#alert .dot { display: inline-block; width: 14px; height: 14px; border-radius: 7px; margin-right: 12px; vertical-align: -1px; }
+.night #alert { color: #F5F5F7; background: rgba(30, 30, 34, 0.9); box-shadow: 0 10px 26px rgba(0, 0, 0, 0.4), inset 0 0 0 1px rgba(255, 255, 255, 0.1); }
+
+/* Picks not here yet: the shape of what is coming, or why it isn't. */
+#placeholder { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; opacity: 0; visibility: hidden; -webkit-transition: opacity 0.3s; transition: opacity 0.3s; }
+#placeholder.on { opacity: 1; visibility: visible; }
+#placeholder, #placeholder * { pointer-events: none; }
+#placeholder .ghost { position: absolute; top: 262px; height: 442px; border-radius: 18px; background: rgba(255, 255, 255, 0.34); box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.6); }
+.night #placeholder .ghost { background: rgba(255, 255, 255, 0.08); box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.12); }
+#placeholder .note { position: absolute; left: 80px; top: 300px; width: 1060px; }
+#placeholder .note .n-title { font-size: 38px; font-weight: 700; color: #1D1D1F; letter-spacing: -0.01em; }
+#placeholder .note .n-body { margin-top: 16px; font-size: 26px; font-weight: 500; line-height: 1.45; color: #6E6E73; }
+#placeholder .note .n-hint { margin-top: 22px; font-size: 23px; font-weight: 600; color: #1D1D1F; }
+.night #placeholder .note .n-title, .night #placeholder .note .n-hint { color: #F5F5F7; }
+.night #placeholder .note .n-body { color: rgba(245, 245, 247, 0.66); }
+
+/* Headlines: one line each, the source on the right. */
+#news .box { left: 300px; top: 120px; width: 1320px; }
+#news .row { padding-right: 300px; overflow: hidden; text-overflow: ellipsis; }
+#news .row .value { right: 24px; font-size: 20px; font-weight: 600; color: rgba(255, 255, 255, 0.45); }
+#news .hint { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* The title: art on the left, what it is and what to do on the right. */
+#detail .box { left: 200px; top: 150px; width: 1520px; height: 650px; padding: 0; overflow: hidden; }
+#detail .art { position: absolute; left: 0; top: 0; width: 760px; height: 650px; background-color: #1A1A1E; background-size: cover; background-position: center; }
+#detail .shade { position: absolute; left: 0; top: 0; width: 760px; height: 650px; background: -webkit-linear-gradient(right, rgba(18, 20, 26, 0.9), rgba(18, 20, 26, 0)); background: linear-gradient(to right, rgba(18, 20, 26, 0), rgba(18, 20, 26, 0.9)); }
+#detail .info { position: absolute; left: 800px; top: 54px; width: 660px; }
+#detail .name { font-size: 46px; font-weight: 700; line-height: 1.08; letter-spacing: -0.015em; color: #FFF; max-height: 110px; overflow: hidden; }
+#detail .meta { margin-top: 14px; font-size: 23px; font-weight: 600; color: rgba(255, 255, 255, 0.55); }
+#detail .overview { margin-top: 22px; font-size: 23px; font-weight: 500; line-height: 1.45; color: rgba(255, 255, 255, 0.82); max-height: 190px; overflow: hidden; }
+#detail .actions { position: absolute; left: 800px; bottom: 54px; width: 660px; }
+#detail .act { height: 66px; margin-top: 12px; padding: 0 24px; border-radius: 18px; font-size: 26px; font-weight: 600; line-height: 66px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; background: rgba(255, 255, 255, 0.1); -webkit-transition: background-color 0.14s, color 0.14s; transition: background-color 0.14s, color 0.14s; }
+#detail .act.focus { background: #FFF; color: #1D1D1F; }
+#detail .act.off { color: rgba(255, 255, 255, 0.35); }
+
+/* The one field the TV itself types: the TMDB key and the city. */
+#input .box { left: 500px; top: 300px; width: 920px; }
+#input .field { display: block; width: 860px; height: 80px; margin: 6px 0 4px; padding: 0 22px; box-sizing: border-box; border: 0; border-radius: 18px; font-family: inherit; font-size: 28px; color: #FFF; background: rgba(255, 255, 255, 0.12); outline: none; -webkit-user-select: text; user-select: text; }
+#input .field::-webkit-input-placeholder { color: rgba(255, 255, 255, 0.35); }
+#input .box .hint { font-size: 21px; }
+
+/* Diagnostics: what the app can and can't read on this TV. */
+#diag .box { left: 380px; top: 110px; width: 1160px; }
+#diag .line { position: relative; padding: 6px 18px; font-size: 22px; font-weight: 500; line-height: 1.5; color: rgba(255, 255, 255, 0.85); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#diag .line b { font-weight: 700; color: #FFF; }
+#diag .line.bad { color: #FF9F9A; }
+#diag .line.good { color: #8FE3B8; }

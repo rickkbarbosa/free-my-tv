@@ -134,11 +134,15 @@
 
   // MARK: - Focus
 
-  var Z = {TOP: 'top', CARDS: 'cards', SHELF: 'shelf', DRAWER: 'drawer', APPS: 'apps', SETTINGS: 'settings', EDIT: 'edit', LANG: 'lang'};
-  var st = {zone: Z.SHELF, top: 0, tab: 0, card: 0, shelf: 0, drawer: 0, grid: 0, row: 0, edit: 0, lang: 0};
+  var Z = {TOP: 'top', CARDS: 'cards', SHELF: 'shelf', DRAWER: 'drawer', APPS: 'apps', SETTINGS: 'settings', EDIT: 'edit',
+    LANG: 'lang', NEWS: 'news', DETAIL: 'detail', INPUT: 'input', CITY: 'city', DIAG: 'diag'};
+  var st = {zone: Z.SHELF, top: 0, tab: 0, card: 0, shelf: 0, drawer: 0, grid: 0, row: 0, edit: 0, lang: 0, news: 0, detail: 0};
   var cards = [];
 
-  function sheetOpen() { return st.zone === Z.APPS || st.zone === Z.SETTINGS || st.zone === Z.EDIT || st.zone === Z.LANG; }
+  function sheetOpen() {
+    return st.zone === Z.APPS || st.zone === Z.SETTINGS || st.zone === Z.EDIT || st.zone === Z.LANG ||
+      st.zone === Z.NEWS || st.zone === Z.DETAIL || st.zone === Z.INPUT || st.zone === Z.DIAG;
+  }
 
   function updateFocus() {
     var i, list;
@@ -163,6 +167,9 @@
     focusRows($('settings'), st.row, st.zone === Z.SETTINGS);
     focusRows($('shelfedit'), st.edit, st.zone === Z.EDIT);
     focusRows($('langpick'), st.lang, st.zone === Z.LANG);
+    focusRows($('news'), st.news, st.zone === Z.NEWS);
+    list = document.querySelectorAll('#detail .act');
+    for (i = 0; i < list.length; i++) setClass(list[i], 'focus', st.zone === Z.DETAIL && st.detail === i);
     if (langHint) langHint.textContent = (st.lang + 1) + ' / ' + languageChoices().length + '  ·  ' + tr('OK picks, Back cancels.');
     setClass(body, 'drawer-open', st.zone === Z.DRAWER);
   }
@@ -234,7 +241,7 @@
     setClass(body, 'no-picks', !list.length);
     var same = list.length === cards.length;
     for (var i = 0; same && i < list.length; i++) same = list[i].id === cards[i].id && list[i].backdrop === cards[i].backdrop && list[i].meta === cards[i].meta;
-    if (same && holder.children.length === list.length) return;
+    if (same && holder.children.length === list.length && list.length) return;
     cards = list;
     holder.innerHTML = '';
     var rects = [[80, 1040], [1160, 320], [1520, 320]];
@@ -251,7 +258,36 @@
     st.card = Math.min(st.card, Math.max(0, list.length - 1));
     if (!list.length && st.zone === Z.CARDS) st.zone = Z.SHELF;
     backdrop(list.length ? Data.image(list[0].backdrop, 'w300') : '');
+    renderPlaceholder(list.length > 0);
     updateFocus();
+  }
+
+  /** No picks: the shape of them while they load, or why they aren't here and what to do about it. */
+  function renderPlaceholder(has) {
+    var holder = $('placeholder');
+    holder.innerHTML = '';
+    setClass(holder, 'on', !has);
+    if (has) return;
+    var error = Data.recsError ? Data.recsError() : '';
+    if (Data.hasKey() && !error) {
+      var rects = [[80, 1040], [1160, 320], [1520, 320]];
+      for (var i = 0; i < 3; i++) {
+        var ghost = el('div', 'ghost', holder);
+        ghost.style.left = rects[i][0] + 'px';
+        ghost.style.width = rects[i][1] + 'px';
+      }
+      return;
+    }
+    var note = el('div', 'note', holder);
+    if (!Data.hasKey()) {
+      el('div', 'n-title', note, tr('No picks yet'));
+      el('div', 'n-body', note, tr('The picks come from TMDB, with your own free key. Add it in Home Settings and they appear here.'));
+      el('div', 'n-hint', note, tr('↓ opens the drawer · Home Settings › TMDB key'));
+    } else {
+      el('div', 'n-title', note, tr("Couldn't load the picks"));
+      el('div', 'n-body', note, error === 'TMDB rejected the key' ? tr('TMDB rejected the key. Check it in Home Settings.') : tr('Check the TV’s connection, then open Home Settings to try again.'));
+      el('div', 'n-hint', note, tr('Home Settings › TMDB key'));
+    }
   }
 
   var bgUrl = null, bgFront = 'bgA';
@@ -325,6 +361,7 @@
       drawerItems.push({label: x.label || tr('Live TV'), symbol: x.symbol, off: !x.connected, run: launcher(x.id, x.label)});
     }
     drawerInputs = drawerItems.length;
+    if (Feeds.enabled() && Feeds.items().length) drawerItems.push({label: tr('News'), symbol: 'bell', run: openNews});
     drawerItems.push({label: tr('All Apps'), symbol: 'apps', run: openApps});
     drawerItems.push({label: tr('Home Settings'), symbol: 'settings', run: openSettings});
     drawerItems.push({label: tr('TV Settings'), symbol: 'tv_settings', run: tvSettings});
@@ -429,6 +466,232 @@
     updateFocus();
   }
 
+  // MARK: - News: the headlines the TV read by itself, and the TV's browser for the whole story
+
+  function openLink(url) {
+    if (!url) return;
+    TV.open(url, function (ok) {
+      if (!ok) toast(tr("Couldn't open the TV's browser."));
+    });
+  }
+
+  function renderNews() {
+    var box = $('news').firstChild, list = Feeds.items(), shown = Math.min(list.length, 12);
+    box.innerHTML = '';
+    var title = el('div', 'title', box);
+    sym('bell', title);
+    title.appendChild(document.createTextNode(tr('News')));
+    var holder = el('div', 'list', box), rows = el('div', 'rows', holder);
+    holder.style.height = Math.min(Math.max(1, shown), 6) * 78 + 'px';
+    for (var i = 0; i < shown; i++) {
+      var row = el('div', 'row', rows, list[i].title);
+      el('span', 'value', row, list[i].source);
+      hover(row, Z.NEWS, i);
+    }
+    if (!shown) el('div', 'row', rows, tr('No headlines right now.'));
+    var hint = el('div', 'hint', box, shown ? tr('OK opens it in the TV’s browser.') : tr('Home Settings › News, or check the connection.'));
+    var ago = Feeds.ago(Feeds.at());
+    if (shown && ago) hint.textContent += '  ·  ' + ago;
+    updateFocus();
+  }
+
+  function openNews() {
+    if (!Feeds.items().length) { toast(tr('No headlines right now.')); return; }
+    st.zone = Z.NEWS;
+    st.news = 0;
+    renderNews();
+    setClass($('news'), 'open', true);
+    updateFocus();
+  }
+
+  // MARK: - The title: what it is, and one button that opens it
+
+  var detailPick = null;
+
+  function openDetail(p) {
+    if (!p) return;
+    detailPick = p;
+    st.detail = 0;
+    st.zone = Z.DETAIL;
+    renderDetail();
+    setClass($('detail'), 'open', true);
+    updateFocus();
+  }
+
+  function renderDetail() {
+    var box = $('detail').firstChild, p = detailPick;
+    box.innerHTML = '';
+    if (!p) return;
+    var art = el('div', 'art', box);
+    if (p.backdrop) art.style.backgroundImage = 'url(' + Data.image(p.backdrop, 'w780') + ')';
+    el('div', 'shade', box);
+    var info = el('div', 'info', box);
+    el('div', 'name', info, p.title);
+    var meta = p.meta || '';
+    if (p.rating) meta = (meta ? meta + ' · ' : '') + p.rating.toFixed(1) + '/10';
+    el('div', 'meta', info, meta);
+    el('div', 'overview', info, p.overview || '');
+    var actions = el('div', 'actions', box), app = Data.appFor(p.app);
+    var watch = el('div', 'act' + (app ? '' : ' off'), actions, app ? trf('Watch on {app}', {app: app.title}) : tr('Watch'));
+    hover(watch, Z.DETAIL, 0);
+    var close = el('div', 'act', actions, tr('Close'));
+    hover(close, Z.DETAIL, 1);
+  }
+
+  function closeDetail() {
+    setClass($('detail'), 'open', false);
+    detailPick = null;
+    st.zone = Z.SHELF;
+    updateFocus();
+  }
+
+  // MARK: - Settings typed on the TV: the TMDB key and the city
+
+  var inputKind = '', inputField = null, cityResults = [];
+
+  function openInput(kind) {
+    inputKind = kind;
+    cityResults = [];
+    var box = $('input').firstChild, text = kind === 'key' ? tr('TMDB key') : tr('City');
+    box.innerHTML = '';
+    var title = el('div', 'title', box);
+    sym(kind === 'key' ? 'settings' : 'home', title);
+    title.appendChild(document.createTextNode(text));
+    var field = document.createElement('input');
+    field.className = 'field';
+    field.type = 'text';
+    field.setAttribute('autocorrect', 'off');
+    field.setAttribute('autocapitalize', 'off');
+    field.setAttribute('spellcheck', 'false');
+    field.placeholder = kind === 'key' ? tr('Paste the API Read Access Token') : tr('Type a city name');
+    field.value = kind === 'key' ? String(Prefs.get('tmdbKey', '') || '') : (Place.city || '');
+    box.appendChild(field);
+    el('div', 'hint', box, kind === 'key'
+      ? tr('OK saves and restarts Free My TV. Back cancels.')
+      : tr('Type the name, then OK searches. Back cancels.'));
+    inputField = field;
+    setClass($('input'), 'open', true);
+    setClass($('settings'), 'open', false);
+    st.zone = Z.INPUT;
+    setTimeout(function () { try { field.focus(); } catch (e) {} }, 60);
+  }
+
+  function closeInput() {
+    setClass($('input'), 'open', false);
+    inputField = null;
+    openSettings();
+  }
+
+  function submitInput() {
+    if (!inputField) return;
+    var value = String(inputField.value || '').replace(/^\s+|\s+$/g, '');
+    if (!value) { closeInput(); return; }
+    if (inputKind === 'key') {
+      Prefs.set('tmdbKey', value);
+      toast(tr('Saving and restarting…'));
+      setTimeout(function () { try { location.reload(); } catch (e) {} }, 600);
+      return;
+    }
+    searchCity(value);
+  }
+
+  function searchCity(name) {
+    var x = new XMLHttpRequest(), over = false;
+    x.open('GET', 'https://geocoding-api.open-meteo.com/v1/search?name=' + encodeURIComponent(name)
+      + '&count=5&language=' + I18N.base + '&format=json', true);
+    x.timeout = 10000;
+    x.onreadystatechange = function () {
+      if (x.readyState !== 4 || over) return;
+      over = true;
+      var data = null;
+      try { data = JSON.parse(x.responseText); } catch (e) {}
+      cityResults = data && data.results ? data.results : [];
+      if (!cityResults.length) { toast(tr('No city found with that name.')); return; }
+      renderCityResults();
+    };
+    x.ontimeout = x.onerror = function () { if (!over) { over = true; toast(tr('No connection.')); } };
+    x.send();
+  }
+
+  function renderCityResults() {
+    var box = $('input').firstChild;
+    box.innerHTML = '';
+    el('div', 'title', box, tr('City'));
+    var holder = el('div', 'list', box), rows = el('div', 'rows', holder);
+    holder.style.height = Math.min(cityResults.length, 5) * 78 + 'px';
+    for (var i = 0; i < cityResults.length && i < 5; i++) {
+      var r = cityResults[i], where = [r.admin1, r.country].filter(function (s) { return !!s; }).join(', ');
+      var row = el('div', 'row', rows, r.name);
+      el('span', 'value', row, where);
+      hover(row, Z.CITY, i);
+    }
+    el('div', 'hint', box, tr('OK uses this city. Back goes back.'));
+    st.zone = Z.CITY;
+    st.city = 0;
+    updateFocus();
+  }
+
+  function pickCity() {
+    var r = cityResults[st.city];
+    if (!r) return;
+    Prefs.set('lat', r.latitude);
+    Prefs.set('lon', r.longitude);
+    Prefs.set('cityName', r.name);
+    if (r.country_code) Prefs.set('region', r.country_code);
+    if (typeof r.id !== 'undefined') Prefs.set('cityId', r.id);
+    toast(tr('Saving and restarting…'));
+    setTimeout(function () { try { location.reload(); } catch (e) {} }, 600);
+  }
+
+  // MARK: - Diagnostics: what this app can and can't read on this TV
+
+  function openDiag() {
+    var box = $('diag').firstChild, status = Feeds.status(), sources = Feeds.sources();
+    box.innerHTML = '';
+    el('div', 'title', box, tr('Diagnostics'));
+    function line(name, value, state) {
+      var row = el('div', 'line' + (state ? ' ' + state : ''), box);
+      el('b', '', row, name + ': ');
+      row.appendChild(document.createTextNode(value));
+    }
+    var tv = TV.status ? TV.status() : {source: TV.name};
+    line('App', 'Free My TV custom 1.2 · ' + TV.name);
+    line('Apps on this TV', apps.length + ' (' + (tv.source || 'unknown') + ')', apps.length ? 'good' : 'bad');
+    if (tv.pairing) line('System app list', tv.pairing, tv.pairing.indexOf('paired') === 0 ? 'good' : '');
+    line('TMDB key', Data.hasKey() ? 'set (' + Data.keyHint() + ')' : 'missing', Data.hasKey() ? 'good' : 'bad');
+    line('City', (Place.city || tr('Automatic')) + ' · ' + Place.lat + ', ' + Place.lon);
+    line('Picks', cards.length + ' shown · ' + (Data.loading() ? 'loading' : (Data.recsError() || 'ok')),
+      Data.recsError() ? 'bad' : '');
+    line('Headlines', status.count + ' · ' + (Feeds.at() ? Feeds.ago(Feeds.at()) || 'now' : 'never'),
+      status.count ? 'good' : 'bad');
+    for (var i = 0; i < sources.length; i++) {
+      line('  ' + sources[i].name, (sources[i].ok ? 'ok' : 'failed') + ' · ' + sources[i].count + ' · '
+        + sources[i].ms + ' ms' + (sources[i].error ? ' · ' + sources[i].error : ''), sources[i].ok ? 'good' : 'bad');
+    }
+    var al = Feeds.alert();
+    line('Weather alert', al ? al.event + ' · ' + al.severity : 'none', al ? 'bad' : '');
+    el('div', 'hint', box, tr('Back closes. Feeds come from rss_feeds in config.properties.'));
+    st.zone = Z.DIAG;
+    setClass($('settings'), 'open', false);
+    setClass($('diag'), 'open', true);
+    updateFocus();
+  }
+
+  // MARK: - The weather alert, when INMET has one for this city
+
+  function renderAlert() {
+    var box = $('alert'), al = Feeds.enabled() ? Feeds.alert() : null;
+    box.innerHTML = '';
+    if (!al) { setClass(box, 'on', false); return; }
+    var dot = el('span', 'dot', box);
+    dot.style.backgroundColor = al.color;
+    var text = trf('{event} · {severity}', {event: al.event, severity: al.severity});
+    if (al.until) text += ' · ' + trf('until {when}', {when: Feeds.when(al.until)});
+    box.appendChild(document.createTextNode(text));
+    box.onclick = function () { openLink(al.link); };
+    setClass(box, 'on', true);
+  }
+
   // MARK: - All Apps
 
   function renderApps() {
@@ -459,6 +722,11 @@
     setClass($('settings'), 'open', false);
     setClass($('shelfedit'), 'open', false);
     setClass($('langpick'), 'open', false);
+    setClass($('news'), 'open', false);
+    setClass($('detail'), 'open', false);
+    setClass($('input'), 'open', false);
+    setClass($('diag'), 'open', false);
+    detailPick = null;
     langHint = null;
     st.zone = Z.SHELF;
     updateFocus();
@@ -489,6 +757,13 @@
           step: function () { if (Prefs.quotes()) { Prefs.setCoin(i, !Prefs.coin(i)); Data.settingsChanged(); } }});
       })(i);
     }
+    rows.push({label: tr('News'), toggle: Feeds.enabled(),
+      step: function () { Prefs.set('news', !Feeds.enabled()); if (Feeds.enabled()) { Feeds.refresh(true); Feeds.refreshAlert(true); } renderDrawer(); renderAlert(); }});
+    rows.push({label: tr('TMDB key'), value: Data.hasKey() ? Data.keyHint() : tr('Add'), opens: true,
+      step: function (d) { if (d >= 0) openInput('key'); }});
+    rows.push({label: tr('City'), value: Place.city || tr('Automatic'), opens: true,
+      step: function (d) { if (d >= 0) openInput('city'); }});
+    rows.push({label: tr('Diagnostics'), value: '›', step: function (d) { if (d >= 0) openDiag(); }});
     rows.push({label: tr('Shelf'), value: '›', step: function (d) { if (d >= 0) openShelfEdit(); }});
     rows.push({label: tr('TV Settings'), value: '›', step: function (d) { if (d >= 0) tvSettings(); }});
     return rows;
@@ -667,6 +942,7 @@
   }
 
   function activate() {
+    savePos();
     switch (st.zone) {
       case Z.TOP:
         if (st.top < 3) return;
@@ -675,8 +951,15 @@
         else openSettings();
         return;
       case Z.CARDS:
-        var p = cards[st.card], app = p && Data.appFor(p.app);
-        if (app) launcher(app.id, app.title)();
+        openDetail(cards[st.card]);
+        return;
+      case Z.NEWS:
+        if (Feeds.items()[st.news]) openLink(Feeds.items()[st.news].link);
+        return;
+      case Z.DETAIL:
+        var p = detailPick, app = p && Data.appFor(p.app);
+        if (st.detail === 0 && app) { closeDetail(); launcher(app.id, app.title)(); }
+        else if (st.detail === 1) closeDetail();
         return;
       case Z.SHELF:
         if (shelf[st.shelf]) launcher(shelf[st.shelf].id, shelf[st.shelf].title)();
@@ -752,11 +1035,25 @@
       case Z.LANG:
         if (dy) st.lang = Math.max(0, Math.min(languageChoices().length - 1, st.lang + dy));
         break;
+      case Z.NEWS:
+        if (dy) st.news = Math.max(0, Math.min(Math.max(0, Math.min(Feeds.items().length, 12) - 1), st.news + dy));
+        break;
+      case Z.DETAIL:
+        if (dx) st.detail = Math.max(0, Math.min(1, st.detail + dx));
+        break;
+      case Z.CITY:
+        if (dy) st.city = Math.max(0, Math.min(cityResults.length - 1, st.city + dy));
+        break;
     }
     updateFocus();
   }
 
   function back() {
+    if (st.zone === Z.INPUT) { closeInput(); return; }
+    if (st.zone === Z.CITY) { openInput('city'); return; }
+    if (st.zone === Z.DIAG) { setClass($('diag'), 'open', false); openSettings(); return; }
+    if (st.zone === Z.DETAIL) { closeDetail(); return; }
+    if (st.zone === Z.NEWS) { closeSheets(); return; }
     if (st.zone === Z.EDIT) { setClass($('shelfedit'), 'open', false); openSettings(); st.row = rowsNow.length - 2; updateFocus(); return; }
     if (st.zone === Z.LANG) { closeLanguages(false); return; }
     if (sheetOpen()) { closeSheets(); return; }
@@ -766,9 +1063,14 @@
   }
 
   /** The pointer focuses what it's over (the Magic Remote, or a mouse when previewing). */
+  function sheetZone(zone) {
+    return zone === Z.APPS || zone === Z.SETTINGS || zone === Z.EDIT || zone === Z.LANG || zone === Z.NEWS ||
+      zone === Z.DETAIL || zone === Z.CITY;
+  }
+
   function hover(node, zone, index) {
     node.onmouseover = function () {
-      if (saverOn || (sheetOpen() !== (zone === Z.APPS || zone === Z.SETTINGS || zone === Z.EDIT || zone === Z.LANG))) return;
+      if (saverOn || (sheetOpen() !== sheetZone(zone))) return;
       if (zone === Z.DRAWER && st.zone !== Z.DRAWER) return;
       if (zone !== Z.DRAWER && st.zone === Z.DRAWER && zone !== Z.SHELF) return;
       if (zone === Z.SHELF && st.zone === Z.DRAWER) closeDrawer();
@@ -781,6 +1083,9 @@
       else if (zone === Z.SETTINGS) st.row = index;
       else if (zone === Z.EDIT) st.edit = index;
       else if (zone === Z.LANG) st.lang = index;
+      else if (zone === Z.NEWS) st.news = index;
+      else if (zone === Z.DETAIL) st.detail = index;
+      else if (zone === Z.CITY) st.city = index;
       updateFocus();
     };
     node.onclick = function () { node.onmouseover(); activate(); };
@@ -862,6 +1167,18 @@
   document.addEventListener('keydown', function (e) {
     var k = e.keyCode;
     if (poke()) { e.preventDefault(); return; }   // the first press only wakes the screen
+    if (st.zone === Z.INPUT) {
+      if (k === 13) { submitInput(); e.preventDefault(); }
+      else if (k === TV.keys.back || k === 27) { closeInput(); e.preventDefault(); }
+      return;   // everything else is typing: the TV's own keyboard (and its microphone) handles it
+    }
+    if (st.zone === Z.CITY) {
+      if (k === 13) { pickCity(); e.preventDefault(); }
+      else if (k === TV.keys.back || k === 27) { openInput('city'); e.preventDefault(); }
+      else if (k === 38) { move(0, -1); e.preventDefault(); }
+      else if (k === 40) { move(0, 1); e.preventDefault(); }
+      return;
+    }
     if (k === TV.keys.left) move(-1, 0);
     else if (k === TV.keys.right) move(1, 0);
     else if (k === TV.keys.up) move(0, -1);
@@ -908,6 +1225,24 @@
     });
   }
 
+  /** Where the person was, so opening the app again doesn't send them back to the first tab. */
+  function savePos() {
+    try { sessionStorage.setItem('fmtv.pos', JSON.stringify({tab: st.tab, shelf: st.shelf, at: Date.now()})); } catch (e) {}
+  }
+
+  function restorePos() {
+    var p = null;
+    try { p = JSON.parse(sessionStorage.getItem('fmtv.pos')); } catch (e) {}
+    st.zone = Z.SHELF;
+    if (p && Date.now() - p.at < 30 * 60000) {
+      if (p.tab >= 0 && p.tab < 3 && p.tab !== st.tab) { st.tab = p.tab; renderCards(); }
+      if (p.shelf >= 0 && p.shelf < shelf.length) st.shelf = p.shelf;
+    } else {
+      st.shelf = 0;
+    }
+    updateFocus();
+  }
+
   /** Back to the home screen (the app was opened again): the shelf, everything closed, the first tab. */
   function reset() {
     hideSaver();
@@ -917,6 +1252,12 @@
     if (st.tab !== 0) { st.tab = 0; renderCards(); }
     updateFocus();
   }
+
+  Feeds.onChange(function () {
+    renderAlert();
+    if (st.zone === Z.NEWS) renderNews();
+    renderDrawer();
+  });
 
   Data.onChange(function () {
     renderQuotes();
@@ -928,8 +1269,9 @@
   function reopened() {
     // LG: with handlesRelaunch the app has to come to the front itself, or opening it again while it runs shows nothing.
     if (window.PalmSystem && window.PalmSystem.activate) window.PalmSystem.activate();
-    reset();
-    loadApps(function () { renderShelf(); renderDrawer(); Data.refresh(); });
+    hideSaver();
+    closeSheets();
+    loadApps(function () { restorePos(); renderShelf(); renderDrawer(); Data.refresh(); Feeds.refresh(); });
   }
 
   window.addEventListener('resize', fit);
@@ -944,14 +1286,22 @@
   I18N.set(Prefs.language());
   fit();
   renderTop();
+  renderAlert();
   loadApps(function () {
     renderAll();
+    restorePos();
     Data.refresh();
+    Feeds.refresh();
+    // The alert list is the heavy one (a few hundred KB): after the first paint, never in front of it.
+    setTimeout(function () { Feeds.refreshAlert(); }, 3000);
   });
   setInterval(function () {
     renderClock();
     checkNight();
     Data.refresh();
+    Feeds.refresh();
+    Feeds.refreshAlert();
+    savePos();
     if (!saverOn && !sheetOpen() && Date.now() - idleAt > SAVER_AFTER) showSaver();
     if (saverOn) tickSaverClock($('saver').querySelector('.clock'));
   }, 30000);
