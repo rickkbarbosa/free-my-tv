@@ -118,7 +118,22 @@ The watchdog build adds headlines and Brazil's severe-weather alerts to the LG a
 - **Diagnostics.** *Home Settings › Diagnostics* shows where the app list came from (launch points, the paired
   remote API, or the built-in list), the TMDB and feed status, and the alert found for the city.
 
-Everything else — the picks, the shelf, the drawer, the screensaver — is upstream Free My TV.
+## Utilities (this build)
+
+- **Rain in the next two hours.** Open-Meteo's 15-minute forecast: the weather card says *Rain in ~40 min* or
+  *No rain in the next 2 hours*, next to the UV index and the air-quality index (AQI).
+- **Sleep timer.** *Home Settings › Sleep timer* (or the drawer's **Timer**): 15, 30, 60 or 90 minutes, screen off,
+  or turn the TV off now. It warns at five minutes, survives a relaunch, and is dropped if it expired while off.
+- **Screen off.** The panel goes black and the sound keeps playing; any key brings it back. Uses webOS's
+  `turnOffScreen` when the TV allows it, and a black layer when it doesn't.
+- **Dim.** *Home Settings › Dim*: off, low, medium, high, or automatic (medium from 22:00 to 07:00).
+- **Ambient clock.** Five minutes without a key press turn the screen into a large clock with the weather, the first
+  headline and the weather alert, shifting a few pixels every half minute for OLED panels. *Home Settings ›
+  Screensaver* switches between the clock (default here) and the photo screensaver.
+- **Ten shelf apps.** The shelf now holds up to 10 apps, and the photo screensaver asks TMDB for `w1280` instead of
+  the original file.
+
+Everything else — the picks, the shelf, the drawer, the photo screensaver — is upstream Free My TV.
 
 ## Settings
 

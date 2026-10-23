@@ -76,7 +76,7 @@
     ['jellyfin', /jellyfin/i, /jellyfin/i, ['#AA5CC3', '#00A4DC']],
     ['spotify', /spotify/, /spotify/i, ['#1DB954', '#0F7A36']]
   ];
-  var MAX_SHELF = 8;
+  var MAX_SHELF = 10;
 
   function shelfKey(app) {
     for (var i = 0; i < SHELF.length; i++) if (SHELF[i][1].test(app.id) || SHELF[i][2].test(app.title)) return SHELF[i];
@@ -135,13 +135,13 @@
   // MARK: - Focus
 
   var Z = {TOP: 'top', CARDS: 'cards', SHELF: 'shelf', DRAWER: 'drawer', APPS: 'apps', SETTINGS: 'settings', EDIT: 'edit',
-    LANG: 'lang', NEWS: 'news', DETAIL: 'detail', INPUT: 'input', CITY: 'city', DIAG: 'diag'};
-  var st = {zone: Z.SHELF, top: 0, tab: 0, card: 0, shelf: 0, drawer: 0, grid: 0, row: 0, edit: 0, lang: 0, news: 0, detail: 0};
+    LANG: 'lang', NEWS: 'news', DETAIL: 'detail', INPUT: 'input', CITY: 'city', DIAG: 'diag', TIMER: 'timer'};
+  var st = {zone: Z.SHELF, top: 0, tab: 0, card: 0, shelf: 0, drawer: 0, grid: 0, row: 0, edit: 0, lang: 0, news: 0, detail: 0, timer: 0};
   var cards = [];
 
   function sheetOpen() {
     return st.zone === Z.APPS || st.zone === Z.SETTINGS || st.zone === Z.EDIT || st.zone === Z.LANG ||
-      st.zone === Z.NEWS || st.zone === Z.DETAIL || st.zone === Z.INPUT || st.zone === Z.DIAG;
+      st.zone === Z.NEWS || st.zone === Z.DETAIL || st.zone === Z.INPUT || st.zone === Z.DIAG || st.zone === Z.TIMER;
   }
 
   function updateFocus() {
@@ -168,6 +168,7 @@
     focusRows($('shelfedit'), st.edit, st.zone === Z.EDIT);
     focusRows($('langpick'), st.lang, st.zone === Z.LANG);
     focusRows($('news'), st.news, st.zone === Z.NEWS);
+    focusRows($('timer'), st.timer, st.zone === Z.TIMER);
     list = document.querySelectorAll('#detail .act');
     for (i = 0; i < list.length; i++) setClass(list[i], 'focus', st.zone === Z.DETAIL && st.detail === i);
     if (langHint) langHint.textContent = (st.lang + 1) + ' / ' + languageChoices().length + '  ·  ' + tr('OK picks, Back cancels.');
@@ -364,6 +365,7 @@
     }
     drawerInputs = drawerItems.length;
     if (Feeds.enabled() && Feeds.items().length) drawerItems.push({label: tr('News'), symbol: 'bell', run: openNews});
+    drawerItems.push({label: sleepAt ? sleepMinutes() + ' min' : tr('Timer'), symbol: 'bedtime', run: openTimer});
     drawerItems.push({label: tr('All Apps'), symbol: 'apps', run: openApps});
     drawerItems.push({label: tr('Home Settings'), symbol: 'settings', run: openSettings});
     drawerItems.push({label: tr('TV Settings'), symbol: 'tv_settings', run: tvSettings});
@@ -422,6 +424,15 @@
     sym(Data.symbol(w.code, w.isDay), now);
     el('span', 'temp', now, Data.degrees(w.temp));
     el('div', 'cond', card, Data.condition(w.code, w.isDay));
+    var extra = [];
+    if (w.rain) {
+      if (w.rain.inMin !== null) extra.push(trf('Rain in ~{n} min', {n: Math.max(5, Math.round(w.rain.inMin / 5) * 5)}));
+      else extra.push(tr('No rain in the next 2 hours'));
+    }
+    if (w.uv >= 3) extra.push('UV ' + Math.round(w.uv));
+    var air = Data.air;
+    if (air && air.aqi !== null && air.aqi !== undefined) extra.push('AQI ' + Math.round(air.aqi));
+    if (extra.length) el('div', 'extra', card, extra.join(' · '));
     el('div', 'range', card, trf('H:{max}', {max: Data.degrees(w.max)}) + '   ' + trf('L:{min}', {min: Data.degrees(w.min)}));
     el('div', 'split', card);
     var hours = el('div', 'hours', card), width = parseFloat(card.style.width) - 30 - 422, hw = width / 6;
@@ -645,6 +656,52 @@
     setTimeout(function () { try { location.reload(); } catch (e) {} }, 600);
   }
 
+  // MARK: - Sleep timer
+
+  var timerRowsNow = [];
+
+  function timerRows() {
+    var rows = [], opts = [15, 30, 60, 90], i;
+    for (i = 0; i < opts.length; i++) {
+      (function (n) {
+        rows.push({label: trf('Turn off in {n} min', {n: n}),
+          step: function () { setSleep(n); closeSheets(); }});
+      })(opts[i]);
+    }
+    rows.push({label: tr('Screen off'), value: tr('Now'), step: function () { closeSheets(); screenOff(); }});
+    if (sleepAt) rows.push({label: tr('Cancel timer'), value: sleepMinutes() + ' min', step: function () { cancelSleep(); }});
+    rows.push({label: tr('Turn the TV off'), step: function () { closeSheets(); turnOffNow(); }});
+    return rows;
+  }
+
+  function renderTimer() {
+    var box = $('timer').firstChild;
+    box.innerHTML = '';
+    var title = el('div', 'title', box);
+    sym('bedtime', title);
+    title.appendChild(document.createTextNode(tr('Sleep timer')));
+    timerRowsNow = timerRows();
+    var holder = el('div', 'list', box), rows = el('div', 'rows', holder);
+    holder.style.height = Math.min(timerRowsNow.length, 7) * 78 + 'px';
+    for (var i = 0; i < timerRowsNow.length; i++) {
+      var r = timerRowsNow[i], row = el('div', 'row', rows, r.label);
+      if (r.value) el('span', 'value', row, r.value);
+      hover(row, Z.TIMER, i);
+    }
+    el('div', 'hint', box, sleepAt ? trf('Turning off in {n} min', {n: sleepMinutes()})
+      : tr('The TV turns off when the timer ends.'));
+    if (st.zone === Z.TIMER) updateFocus();
+  }
+
+  function openTimer() {
+    st.zone = Z.TIMER;
+    st.timer = 0;
+    renderTimer();
+    setClass($('settings'), 'open', false);
+    setClass($('timer'), 'open', true);
+    updateFocus();
+  }
+
   // MARK: - Diagnostics: what this app can and can't read on this TV
 
   function openDiag() {
@@ -729,6 +786,7 @@
     setClass($('detail'), 'open', false);
     setClass($('input'), 'open', false);
     setClass($('diag'), 'open', false);
+    setClass($('timer'), 'open', false);
     detailPick = null;
     langHint = null;
     st.zone = Z.SHELF;
@@ -767,6 +825,12 @@
     rows.push({label: tr('City'), value: Place.city || tr('Automatic'), opens: true,
       step: function (d) { if (d >= 0) openInput('city'); }});
     rows.push({label: tr('Diagnostics'), value: '›', step: function (d) { if (d >= 0) openDiag(); }});
+    rows.push({label: tr('Sleep timer'), value: sleepAt ? sleepMinutes() + ' min' : tr('Off'), opens: true,
+      step: function (d) { if (d >= 0) openTimer(); }});
+    rows.push({label: tr('Dim'), value: dimName(Prefs.get('dim', 'auto')), opens: true,
+      step: function (d) { cycle('dim', ['off', 'low', 'medium', 'high', 'auto'], Prefs.get('dim', 'auto'), d); applyDim(); }});
+    rows.push({label: tr('Screensaver'), value: saverMode() === 'photos' ? tr('Photos') : tr('Clock'), opens: true,
+      step: function (d) { cycle('saver', ['clock', 'photos'], saverMode(), d); }});
     rows.push({label: tr('Shelf'), value: '›', step: function (d) { if (d >= 0) openShelfEdit(); }});
     rows.push({label: tr('TV Settings'), value: '›', step: function (d) { if (d >= 0) tvSettings(); }});
     return rows;
@@ -959,6 +1023,9 @@
       case Z.NEWS:
         if (Feeds.items()[st.news]) openLink(Feeds.items()[st.news].link);
         return;
+      case Z.TIMER:
+        if (timerRowsNow[st.timer]) { timerRowsNow[st.timer].step(); if (st.zone === Z.TIMER) renderTimer(); }
+        return;
       case Z.DETAIL:
         var p = detailPick, app = p && Data.appFor(p.app);
         if (st.detail === 0 && app) { closeDetail(); launcher(app.id, app.title)(); }
@@ -1047,6 +1114,9 @@
       case Z.CITY:
         if (dy) st.city = Math.max(0, Math.min(cityResults.length - 1, st.city + dy));
         break;
+      case Z.TIMER:
+        if (dy) st.timer = Math.max(0, Math.min(timerRowsNow.length - 1, st.timer + dy));
+        break;
     }
     updateFocus();
   }
@@ -1055,6 +1125,7 @@
     if (st.zone === Z.INPUT) { closeInput(); return; }
     if (st.zone === Z.CITY) { openInput('city'); return; }
     if (st.zone === Z.DIAG) { setClass($('diag'), 'open', false); openSettings(); return; }
+    if (st.zone === Z.TIMER) { closeSheets(); return; }
     if (st.zone === Z.DETAIL) { closeDetail(); return; }
     if (st.zone === Z.NEWS) { closeSheets(); return; }
     if (st.zone === Z.EDIT) { setClass($('shelfedit'), 'open', false); openSettings(); st.row = rowsNow.length - 2; updateFocus(); return; }
@@ -1068,7 +1139,7 @@
   /** The pointer focuses what it's over (the Magic Remote, or a mouse when previewing). */
   function sheetZone(zone) {
     return zone === Z.APPS || zone === Z.SETTINGS || zone === Z.EDIT || zone === Z.LANG || zone === Z.NEWS ||
-      zone === Z.DETAIL || zone === Z.CITY;
+      zone === Z.DETAIL || zone === Z.CITY || zone === Z.TIMER;
   }
 
   function hover(node, zone, index) {
@@ -1089,6 +1160,7 @@
       else if (zone === Z.NEWS) st.news = index;
       else if (zone === Z.DETAIL) st.detail = index;
       else if (zone === Z.CITY) st.city = index;
+      else if (zone === Z.TIMER) st.timer = index;
       updateFocus();
     };
     node.onclick = function () { node.onmouseover(); activate(); };
@@ -1130,7 +1202,7 @@
       var p = photos.length ? photos[saverIndex++ % photos.length] : null;
       var back = front === a ? b : a;
       if (p) {
-        back.style.backgroundImage = 'url(' + Data.image(p.backdrop, 'original') + ')';
+        back.style.backgroundImage = 'url(' + Data.image(p.backdrop, 'w1280') + ')';
         back.style.webkitTransform = back.style.transform = 'scale(1.0)';
         clock.lastChild.textContent = p.title;
         setTimeout(function () {
@@ -1159,8 +1231,141 @@
     setClass($('saver'), 'on', false);
   }
 
+  // MARK: - Ambient: the clock on its own, when the room is quiet
+
+  var ambientOn = false, ambientTimer = 0;
+
+  /** "clock" (the default here) or "photos": what the screen shows when nobody touches it. */
+  function saverMode() { return Prefs.get('saver', 'clock'); }
+
+  function showAmbient() {
+    var a = $('ambient');
+    a.innerHTML = '';
+    var shift = el('div', 'shift', a);
+    var clock = el('div', 'clock', shift, formatDate('format|h:mm', Date.now()));
+    el('div', 'date', shift, formatDate('format|EEEE, MMMM d', Date.now()));
+    var side = el('div', 'side', shift), w = Data.weather;
+    el('div', 'temp', side, w ? Data.degrees(w.temp) : '—');
+    if (w) el('div', 'cond', side, Data.condition(w.code, w.isDay));
+    var item = Feeds.enabled() ? Feeds.items()[0] : null;
+    if (item) {
+      el('div', 'news', side, item.title);
+      el('div', 'src', side, item.source);
+    }
+    var al = Feeds.enabled() ? Feeds.alert() : null;
+    if (al) el('div', 'alertline', side, trf('{event} · {severity}', {event: al.event, severity: al.severity}));
+    ambientOn = true;
+    setClass(a, 'on', true);
+    ambientTimer = setInterval(tickAmbient, 30000);
+    tickAmbient();
+  }
+
+  function tickAmbient() {
+    if (!ambientOn) return;
+    var a = $('ambient'), clock = a.querySelector('.clock'), shift = a.querySelector('.shift'), d = new Date();
+    if (clock) clock.textContent = formatDate('format|h:mm', d.getTime());
+    var date = a.querySelector('.date');
+    if (date) date.textContent = formatDate('format|EEEE, MMMM d', d.getTime());
+    if (shift) {
+      // A few pixels every half minute: a static clock on an OLED is what burns in.
+      var dx = Math.round(Math.sin(d.getMinutes() * 0.7) * 6), dy = Math.round(Math.cos(d.getMinutes() * 0.9) * 5);
+      shift.style.transform = 'translate(' + dx + 'px,' + dy + 'px)';
+    }
+  }
+
+  function hideAmbient() {
+    ambientOn = false;
+    clearInterval(ambientTimer);
+    setClass($('ambient'), 'on', false);
+  }
+
+  // MARK: - Dim, screen off and the sleep timer
+
+  function dimName(v) {
+    return v === 'low' ? tr('Low') : v === 'medium' ? tr('Medium') : v === 'high' ? tr('High')
+      : v === 'auto' ? tr('Automatic') : tr('Off');
+  }
+
+  function dimLevel() {
+    var v = Prefs.get('dim', 'auto');
+    if (v === 'auto') { var h = new Date().getHours(); return h >= 22 || h < 7 ? 2 : 0; }
+    return v === 'low' ? 1 : v === 'medium' ? 2 : v === 'high' ? 3 : 0;
+  }
+
+  function applyDim() {
+    var level = dimLevel();
+    $('dim').className = 'layer' + (level ? ' d' + level : '');
+  }
+
+  var blackOn = false;
+
+  function screenOff() {
+    blackOn = true;
+    setClass($('black'), 'on', true);
+    TV.screenOff(function (ok) {
+      if (!ok && window.PalmSystem) toast(tr('Screen off: any key comes back.'));
+    });
+  }
+
+  function wakeScreen() {
+    if (!blackOn) return false;
+    blackOn = false;
+    setClass($('black'), 'on', false);
+    return true;
+  }
+
+  var SLEEP_KEY = 'fmtv.sleepAt', sleepAt = 0, sleepFive = false;
+  (function () {
+    try { sleepAt = parseInt(localStorage.getItem(SLEEP_KEY) || '0', 10) || 0; } catch (e) {}
+    if (sleepAt && sleepAt < Date.now()) sleepAt = 0;   // it ended while the TV was off
+  })();
+
+  function saveSleep() {
+    try {
+      if (sleepAt) localStorage.setItem(SLEEP_KEY, String(sleepAt));
+      else localStorage.removeItem(SLEEP_KEY);
+    } catch (e) {}
+  }
+
+  function sleepMinutes() { return sleepAt ? Math.max(0, Math.ceil((sleepAt - Date.now()) / 60000)) : 0; }
+
+  function setSleep(minutes) {
+    sleepAt = Date.now() + minutes * 60000;
+    sleepFive = false;
+    saveSleep();
+    toast(trf('Turning off in {n} min', {n: minutes}));
+    renderTimer();
+    renderDrawer();
+  }
+
+  function cancelSleep() {
+    sleepAt = 0;
+    saveSleep();
+    toast(tr('Timer cancelled'));
+    renderTimer();
+    renderDrawer();
+  }
+
+  function turnOffNow() {
+    TV.powerOff(function (ok) {
+      if (!ok) {
+        screenOff();
+        toast(tr("Couldn't turn the TV off. Hold the power key."));
+      }
+    });
+  }
+
+  function tickSleep() {
+    if (!sleepAt) return;
+    var left = sleepAt - Date.now();
+    if (left <= 0) { sleepAt = 0; saveSleep(); turnOffNow(); return; }
+    if (left <= 5 * 60000 && !sleepFive) { sleepFive = true; toast(trf('Turning off in {n} min', {n: 5})); }
+  }
+
   function poke() {
     idleAt = Date.now();
+    if (wakeScreen()) return true;
+    if (ambientOn) { hideAmbient(); return true; }
     if (saverOn) { hideSaver(); return true; }
     return false;
   }
@@ -1290,6 +1495,7 @@
   fit();
   renderTop();
   renderAlert();
+  applyDim();
   loadApps(function () {
     renderAll();
     restorePos();
@@ -1305,10 +1511,16 @@
     Feeds.refresh();
     Feeds.refreshAlert();
     savePos();
-    if (!saverOn && !sheetOpen() && Date.now() - idleAt > SAVER_AFTER) showSaver();
+    tickSleep();
+    applyDim();
+    if (!blackOn && !saverOn && !ambientOn && !sheetOpen() && Date.now() - idleAt > SAVER_AFTER) {
+      if (saverMode() === 'photos') showSaver(); else showAmbient();
+    }
     if (saverOn) tickSaverClock($('saver').querySelector('.clock'));
+    if (ambientOn) tickAmbient();
   }, 30000);
 
   // For the browser preview and tests.
-  window.FreeMyTV = {state: st, move: move, activate: activate, back: back, showSaver: showSaver, hideSaver: hideSaver, toast: toast};
+  window.FreeMyTV = {state: st, move: move, activate: activate, back: back, showSaver: showSaver, hideSaver: hideSaver,
+    showAmbient: showAmbient, hideAmbient: hideAmbient, setSleep: setSleep, applyDim: applyDim, toast: toast};
 })();

@@ -121,7 +121,48 @@ var Data = (function () {
       if (at <= now) continue;
       w.hours.push({at: at, temp: hr.temperature_2m[i], code: hr.weather_code[i], day: !hr.is_day || hr.is_day[i] !== 0});
     }
+    w.uv = o.daily && o.daily.uv_index_max ? o.daily.uv_index_max[0] : 0;
+    // The next two hours in 15-minute steps: when the rain starts, and how likely it is at its worst.
+    var mr = o.minutely_15;
+    w.rain = null;
+    if (mr && mr.time) {
+      w.rain = {inMin: null, prob: 0, mm: 0};
+      for (var j = 0; j < mr.time.length; j++) {
+        var when = localTime(mr.time[j], off);
+        if (when < now - 15 * 60000) continue;
+        var prob = mr.precipitation_probability ? (mr.precipitation_probability[j] || 0) : 0;
+        var mm = mr.precipitation ? (mr.precipitation[j] || 0) : 0;
+        if (prob > w.rain.prob) w.rain.prob = prob;
+        if (mm > w.rain.mm) w.rain.mm = mm;
+        if (w.rain.inMin === null && (prob >= 50 || mm >= 0.2)) {
+          w.rain.inMin = Math.max(0, Math.round((when - now) / 60000));
+        }
+      }
+    }
     return w;
+  }
+
+  // MARK: - Air
+
+  var air = null, airAt = 0, fetchingAir = false;
+  (function () {
+    var a = stored('air');
+    if (a && a.place === PLACE) { air = a.body; airAt = a.at; }
+  })();
+
+  function refreshAir() {
+    var now = Date.now();
+    if (fetchingAir || (airAt && now - airAt < 30 * 60000 && now >= airAt)) return;
+    fetchingAir = true;
+    get('https://air-quality-api.open-meteo.com/v1/air-quality?latitude=' + Place.lat
+        + '&longitude=' + Place.lon + '&current=us_aqi,pm2_5&timezone=auto', {}, function (err, body) {
+      fetchingAir = false;
+      if (err || !body || !body.current) return;
+      air = {aqi: body.current.us_aqi, pm25: body.current.pm2_5, at: Date.now()};
+      airAt = air.at;
+      store('air', {place: PLACE, body: air, at: airAt});
+      changed();
+    });
   }
 
   function refreshWeather() {
@@ -129,8 +170,10 @@ var Data = (function () {
     if (fetchingWeather || (now - weatherAt < 30 * 60000 && now >= weatherAt)) return;
     fetchingWeather = true;
     var url = 'https://api.open-meteo.com/v1/forecast?latitude=' + Place.lat + '&longitude=' + Place.lon
-        + '&current=temperature_2m,weather_code,is_day&daily=temperature_2m_max,temperature_2m_min,sunrise,sunset'
-        + '&hourly=temperature_2m,weather_code,is_day&timezone=auto&forecast_days=2';
+        + '&current=temperature_2m,weather_code,is_day'
+        + '&daily=temperature_2m_max,temperature_2m_min,sunrise,sunset,uv_index_max'
+        + '&hourly=temperature_2m,weather_code,is_day&timezone=auto&forecast_days=2'
+        + '&minutely_15=precipitation,precipitation_probability&forecast_minutely_15=8';
     get(url, {}, function (err, body) {
       fetchingWeather = false;
       if (err) return;
@@ -519,9 +562,10 @@ var Data = (function () {
     onChange: function (fn) { listeners.push(fn); },
     setApps: function (apps) { installed = apps; },
     appFor: appFor,
-    refresh: function () { refreshWeather(); refreshPrices(); refreshRecs(); },
+    refresh: function () { refreshWeather(); refreshAir(); refreshPrices(); refreshRecs(); },
     settingsChanged: function () { pricesAt = 0; refreshPrices(); changed(); },
     get weather() { return weather; },
+    get air() { return air; },
     get weatherAt() { return weatherAt; },
     prices: prices,
     changes: changes,
