@@ -108,10 +108,11 @@ The watchdog build adds headlines and Brazil's severe-weather alerts to the LG a
   sheet to see the notice. Set the city in *Home Settings › City*.
 - **Headlines.** *Home Settings › News* turns them on; the drawer then gets a **News** entry with 8–12 headlines.
   OK opens the story in the TV's browser.
-- **Feeds.** The default list is Manual do Usuário, ESPN and TabNews — the ones that answer a cross-origin request
-  from a TV. `rss_feeds=` in `config.properties` replaces it: most publishers don't send
-  `Access-Control-Allow-Origin`, so point those at a small proxy of your own (a Cloudflare Worker that fetches the
-  feed and returns it with `Access-Control-Allow-Origin: *`).
+- **Feeds.** The default list is G1 (Brasil), Omelete, ESPN, Manual do Usuário and TabNews. G1 and Omelete don't
+  send `Access-Control-Allow-Origin`, so a TV can't read them directly: set `feeds_proxy=` in `config.properties` to
+  a small proxy of your own (it gets the feed address URL-encoded and answers with
+  `Access-Control-Allow-Origin: *`). `rss_feeds=` replaces the list; Omelete has no RSS since 2026, so its entry
+  reads the site's JSON API.
 - **TMDB key and city on the TV.** *Home Settings › TMDB key* and *› City* open the TV's own keyboard, so a generic
   build works without rebuilding: type the key (or search the city), and the app saves it and restarts.
 - **Diagnostics.** *Home Settings › Diagnostics* shows where the app list came from (launch points, the paired

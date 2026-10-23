@@ -113,11 +113,37 @@ var Feeds = (function () {
     return out;
   }
 
+  /** Omelete's JSON API (no RSS since 2026): [{title, alternative_urls, dates}]. */
+  function parseOmelete(text) {
+    var list = null;
+    try { list = JSON.parse(text); } catch (e) { return []; }
+    var out = [];
+    for (var i = 0; list && i < list.length && out.length < PER_FEED; i++) {
+      var c = list[i];
+      if (!c || !c.title) continue;
+      var path = (c.alternative_urls && c.alternative_urls[0]) || c.full_slug || '';
+      if (!path) continue;
+      var at = c.dates && (c.dates.published_at || c.dates.created_at);
+      out.push({title: clean(c.title, 150),
+        link: path.indexOf('http') === 0 ? path : 'https://www.omelete.com.br/' + path,
+        at: Date.parse(at) || Date.now(), source: 'Omelete'});
+    }
+    return out;
+  }
+
   var DEFAULTS = [
-    {name: 'Manual do Usuário', url: 'https://manualdousuario.net/feed/', kind: 'xml'},
+    {name: 'G1', url: 'https://g1.globo.com/rss/g1/brasil/', kind: 'xml'},
+    {name: 'Omelete', url: 'https://www.omelete.com.br/api', kind: 'omelete'},
     {name: 'ESPN', url: 'https://www.espn.com.br/espn/rss/news', kind: 'xml'},
+    {name: 'Manual do Usuário', url: 'https://manualdousuario.net/feed/', kind: 'xml'},
     {name: 'TabNews', url: 'https://www.tabnews.com.br/api/v1/contents?strategy=new&per_page=8', kind: 'json'}
   ];
+
+  /** The feed through a proxy of your own, when the publisher doesn't answer a TV's cross-origin request. */
+  function via(url) {
+    var proxy = CONFIG.feedsProxy || '';
+    return proxy ? proxy + encodeURIComponent(url) : url;
+  }
 
   /** The feeds this build reads: rss_feeds= from config.properties, else the defaults that answer the TV directly. */
   function feedList() {
@@ -126,7 +152,8 @@ var Feeds = (function () {
     var out = [];
     for (var i = 0; i < custom.length; i++) {
       var url = custom[i];
-      out.push({name: host(url), url: url, kind: /tabnews\.com\.br\/api/.test(url) ? 'json' : 'xml'});
+      out.push({name: host(url), url: url,
+        kind: /tabnews\.com\.br\/api/.test(url) ? 'json' : /omelete\.com\.br\/api/.test(url) ? 'omelete' : 'xml'});
     }
     return out;
   }
@@ -205,12 +232,29 @@ var Feeds = (function () {
 
   function finish(list) {
     busy = false;
-    list.sort(function (a, b) { return b.at - a.at; });
-    var seen = {}, out = [];
-    for (var i = 0; i < list.length && out.length < MAX_ITEMS; i++) {
-      if (!list[i].link || seen[list[i].link]) continue;
-      seen[list[i].link] = true;
-      out.push(list[i]);
+    // Round-robin by source, newest first inside each: with five feeds and a 30-item cap, a plain date sort would
+    // push a whole feed out of the list on a busy day.
+    var groups = {}, order = [], i, s;
+    for (i = 0; i < list.length; i++) {
+      s = list[i].source;
+      if (!groups[s]) { groups[s] = []; order.push(s); }
+      groups[s].push(list[i]);
+    }
+    for (i = 0; i < order.length; i++) {
+      groups[order[i]].sort(function (a, b) { return b.at - a.at; });
+    }
+    var seen = {}, out = [], round = 0, added = true;
+    while (out.length < MAX_ITEMS && added) {
+      added = false;
+      for (i = 0; i < order.length && out.length < MAX_ITEMS; i++) {
+        var item = groups[order[i]][round];
+        if (!item) continue;
+        added = true;
+        if (!item.link || seen[item.link]) continue;
+        seen[item.link] = true;
+        out.push(item);
+      }
+      round++;
     }
     items = out;
     at = Date.now();
@@ -235,8 +279,9 @@ var Feeds = (function () {
     (function next(i) {
       if (i >= list.length) { finish(all); return; }
       var started = Date.now(), feed = list[i];
-      get(feed.url, function (err, body) {
-        var got = err ? [] : (feed.kind === 'json' ? parseTabNews(body) : parseXml(body, feed.name));
+      get(via(feed.url), function (err, body) {
+        var got = err ? [] : feed.kind === 'json' ? parseTabNews(body)
+          : feed.kind === 'omelete' ? parseOmelete(body) : parseXml(body, feed.name);
         sources.push({name: feed.name, url: feed.url, ok: !err && got.length > 0, count: got.length,
           ms: Date.now() - started, error: err ? err.message : ''});
         for (var k = 0; k < got.length; k++) all.push(got[k]);

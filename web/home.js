@@ -667,8 +667,9 @@
     line('Headlines', status.count + ' · ' + (Feeds.at() ? Feeds.ago(Feeds.at()) || 'now' : 'never'),
       status.count ? 'good' : 'bad');
     for (var i = 0; i < sources.length; i++) {
+      var why = sources[i].error === 'no connection' ? 'no connection, or the site denies the TV (CORS)' : sources[i].error;
       line('  ' + sources[i].name, (sources[i].ok ? 'ok' : 'failed') + ' · ' + sources[i].count + ' · '
-        + sources[i].ms + ' ms' + (sources[i].error ? ' · ' + sources[i].error : ''), sources[i].ok ? 'good' : 'bad');
+        + sources[i].ms + ' ms' + (why ? ' · ' + why : ''), sources[i].ok ? 'good' : 'bad');
     }
     var al = Feeds.alert();
     line('Weather alert', al ? al.event + ' · ' + al.severity : 'none', al ? 'bad' : '');

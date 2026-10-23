@@ -15,7 +15,7 @@ import translate  # noqa: E402  (the catalogues and the keys the web app uses)
 
 GENERIC = {'tmdbKey': '', 'tmdbRegion': '', 'latitude': '', 'longitude': '', 'city': '', 'language': 'auto',
            'currency': '', 'temperature': 'auto', 'showCrypto': True, 'hideAnimation': False, 'hideApps': [],
-           'news': True, 'rssFeeds': []}
+           'news': True, 'rssFeeds': [], 'feedsProxy': ''}
 
 
 def config_from_args(args):
@@ -61,6 +61,7 @@ def read_config(path):
         'hideApps': [s.strip() for s in values.get('hide_apps', '').split(',') if s.strip()],
         'news': values.get('news', 'true').lower() != 'false',
         'rssFeeds': [s.strip() for s in values.get('rss_feeds', '').split(',') if s.strip()],
+        'feedsProxy': values.get('feeds_proxy', '').strip(),
     }
 
 
