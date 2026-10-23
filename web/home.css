@@ -536,25 +536,41 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
   right: 0;
   top: 0;
   height: 46px;
-  line-height: 46px;
-  padding: 0 76px;
   border-radius: 0;
   font-size: 21px;
   font-weight: 600;
   color: #1D1D1F;
   background: rgba(255, 255, 255, 0.9);
   box-shadow: 0 10px 26px rgba(0, 0, 0, 0.12), inset 0 0 0 1px rgba(255, 255, 255, 0.7);
-  white-space: nowrap;
   overflow: hidden;
-  text-overflow: ellipsis;
   opacity: 0;
   visibility: hidden;
   -webkit-transition: opacity 0.3s;
   transition: opacity 0.3s;
 }
 #alert.on { opacity: 1; visibility: visible; }
-#alert .dot { display: inline-block; width: 14px; height: 14px; border-radius: 7px; margin-right: 12px; vertical-align: -1px; }
+#alert .bar { display: -webkit-box; display: flex; height: 46px; }
+#alert .chip {
+  -webkit-box-flex: 0; flex: 0 0 auto;
+  display: -webkit-box; display: flex; align-items: center;
+  max-width: 46%; padding: 0 22px 0 76px;
+  white-space: nowrap; overflow: hidden;
+  border-right: 1px solid rgba(0, 0, 0, 0.08);
+}
+#alert .chip .ct { overflow: hidden; text-overflow: ellipsis; }
+#alert .dot { display: inline-block; width: 14px; height: 14px; border-radius: 7px; margin-right: 12px; vertical-align: -1px; -webkit-box-flex: 0; flex: 0 0 auto; }
+#alert .track { position: relative; -webkit-box-flex: 1; flex: 1; overflow: hidden; }
+#alert .hl {
+  line-height: 46px; margin: 0 76px 0 24px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  -webkit-transition: opacity 0.28s; transition: opacity 0.28s;
+}
+#alert.nochip .hl { margin-left: 76px; }
+#alert .hl b { font-weight: 700; }
+#alert .mq { display: inline-block; line-height: 46px; white-space: nowrap; padding-left: 76px; will-change: transform; }
+#alert .mq span { display: inline-block; padding-right: 120px; }
 .night #alert { color: #F5F5F7; background: rgba(30, 30, 34, 0.9); box-shadow: 0 10px 26px rgba(0, 0, 0, 0.4), inset 0 0 0 1px rgba(255, 255, 255, 0.1); }
+.night #alert .chip { border-right-color: rgba(255, 255, 255, 0.14); }
 
 /* Picks not here yet: the shape of what is coming, or why it isn't. */
 #placeholder { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; opacity: 0; visibility: hidden; -webkit-transition: opacity 0.3s; transition: opacity 0.3s; }

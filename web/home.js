@@ -258,7 +258,7 @@
     }
     st.card = Math.min(st.card, Math.max(0, list.length - 1));
     if (!list.length && st.zone === Z.CARDS) st.zone = Z.SHELF;
-    backdrop(list.length ? Data.image(list[0].backdrop, 'w300') : '');
+    backdrop(wantedBg(list));
     renderPlaceholder(list.length > 0);
     updateFocus();
   }
@@ -294,6 +294,20 @@
   }
 
   var bgUrl = null, bgFront = 'bgA';
+
+  var heroUrl = '', heroAt = 0;
+
+  /** Behind the home: the leading headline's picture when the feeds bring one, else the first pick's. */
+  function wantedBg(list) {
+    var pick = list.length ? Data.image(list[0].backdrop, 'w300') : '';
+    if (!Prefs.get('newsbg', true) || !Feeds.enabled()) return pick;
+    var items = Feeds.items(), hero = null;
+    for (var i = 0; i < items.length; i++) if (items[i].image) { hero = items[i]; break; }
+    if (!hero) return pick;
+    // A new headline's photo at most every 15 minutes: it is a 100-550 KB download on a TV.
+    if (!heroUrl || Date.now() - heroAt > 900000) { heroUrl = hero.image; heroAt = Date.now(); }
+    return heroUrl;
+  }
 
   /** The first pick's photo as the background: drawn tiny and stretched, it's already as soft as a heavy blur. */
   function backdrop(url) {
@@ -739,17 +753,79 @@
 
   // MARK: - The weather alert, when INMET has one for this city
 
+  var barSeq = 0, barIndex = 0, barTimer = 0;
+
+  /** off | rotate | marquee: how the headlines move along the top strip. */
+  function barMode() { return Prefs.get('bar', 'rotate'); }
+
+  /** The strip at the very top: the weather alert on the left, the headlines next to it. */
   function renderAlert() {
     var box = $('alert'), al = Feeds.enabled() ? Feeds.alert() : null;
+    var list = Feeds.enabled() ? Feeds.items() : [], mode = barMode();
+    if (barTimer) { clearInterval(barTimer); barTimer = 0; }
     box.innerHTML = '';
-    if (!al) { setClass(box, 'on', false); return; }
-    var dot = el('span', 'dot', box);
-    dot.style.backgroundColor = al.color;
-    var text = trf('{event} · {severity}', {event: al.event, severity: al.severity});
-    if (al.until) text += ' · ' + trf('until {when}', {when: Feeds.when(al.until)});
-    box.appendChild(document.createTextNode(text));
-    box.onclick = function () { openLink(al.link); };
+    box.onclick = null;
+    if (!al && (!list.length || mode === 'off')) { setClass(box, 'on', false); return; }
+    setClass(box, 'nochip', !al);
+    var bar = el('div', 'bar', box);
+    if (al) {
+      var chip = el('div', 'chip', bar);
+      var dot = el('span', 'dot', chip);
+      dot.style.backgroundColor = al.color;
+      var text = trf('{event} · {severity}', {event: al.event, severity: al.severity});
+      if (al.until) text += ' · ' + trf('until {when}', {when: Feeds.when(al.until)});
+      el('span', 'ct', chip, text);
+      chip.onclick = function (e) { if (e && e.stopPropagation) e.stopPropagation(); openLink(al.link); };
+    }
+    if (list.length && mode !== 'off') {
+      var track = el('div', 'track', bar);
+      if (mode === 'marquee') marquee(track, list);
+      else rotate(track, list);
+    }
     setClass(box, 'on', true);
+  }
+
+  /** One headline at a time, 7s each: the way TV news does it, and readable from the sofa. */
+  function rotate(track, list) {
+    var line = el('div', 'hl', track);
+    function paint() {
+      var it = list[barIndex % list.length];
+      line.innerHTML = '';
+      el('b', '', line, it.source);
+      line.appendChild(document.createTextNode(' · ' + it.title));
+    }
+    barIndex = 0;
+    paint();
+    line.onclick = function () { var it = list[barIndex % list.length]; if (it) openLink(it.link); };
+    barTimer = setInterval(function () {
+      barIndex = (barIndex + 1) % list.length;
+      line.style.opacity = '0';
+      setTimeout(function () { if (!line.parentNode) return; paint(); line.style.opacity = '1'; }, 280);
+    }, 7000);
+  }
+
+  /** The whole list sliding: the marquee, for whoever prefers motion. */
+  function marquee(track, list) {
+    // Eight headlines, not thirty: a 30-item marquee would be a 26,000px layer on a TV's GPU.
+    list = list.slice(0, 8);
+    var text = '', i;
+    for (i = 0; i < list.length; i++) {
+      text += (i ? '\u00a0\u00a0\u00a0\u00b7\u00a0\u00a0\u00a0' : '') + list[i].source + ' · ' + list[i].title;
+    }
+    var mq = el('div', 'mq', track);
+    el('span', '', mq, text);
+    el('span', '', mq, text);
+    var name = 'fmvbar' + (++barSeq);
+    setTimeout(function () {
+      var w = mq.firstChild.offsetWidth;
+      if (!w) return;
+      var style = document.getElementById('barstyle');
+      if (!style) { style = document.createElement('style'); style.id = 'barstyle'; document.head.appendChild(style); }
+      style.textContent = '@-webkit-keyframes ' + name + ' { from { -webkit-transform: translate3d(0,0,0); } to { -webkit-transform: translate3d(-' + w + 'px,0,0); } }' +
+        '@keyframes ' + name + ' { from { transform: translate3d(0,0,0); } to { transform: translate3d(-' + w + 'px,0,0); } }';
+      mq.style.animation = name + ' ' + (w / 90) + 's linear infinite';
+      mq.style.webkitAnimation = name + ' ' + (w / 90) + 's linear infinite';
+    }, 60);
   }
 
   // MARK: - All Apps
@@ -818,6 +894,11 @@
           step: function () { if (Prefs.quotes()) { Prefs.setCoin(i, !Prefs.coin(i)); Data.settingsChanged(); } }});
       })(i);
     }
+    rows.push({label: tr('Headlines on the bar'), opens: true,
+      value: barMode() === 'off' ? tr('Off') : barMode() === 'marquee' ? tr('Scrolling') : tr('Rotating'),
+      step: function (d) { cycle('bar', ['rotate', 'marquee', 'off'], barMode(), d); renderAlert(); }});
+    rows.push({label: tr('News background'), toggle: Prefs.get('newsbg', true),
+      step: function () { Prefs.set('newsbg', !Prefs.get('newsbg', true)); backdrop(wantedBg(cards)); }});
     rows.push({label: tr('News'), toggle: Feeds.enabled(),
       step: function () { Prefs.set('news', !Feeds.enabled()); if (Feeds.enabled()) { Feeds.refresh(true); Feeds.refreshAlert(true); } renderDrawer(); renderAlert(); }});
     rows.push({label: tr('TMDB key'), value: Data.hasKey() ? Data.keyHint() : tr('Add'), opens: true,
@@ -1463,6 +1544,7 @@
 
   Feeds.onChange(function () {
     renderAlert();
+    backdrop(wantedBg(cards));
     if (st.zone === Z.NEWS) renderNews();
     renderDrawer();
   });
@@ -1522,5 +1604,6 @@
 
   // For the browser preview and tests.
   window.FreeMyTV = {state: st, move: move, activate: activate, back: back, showSaver: showSaver, hideSaver: hideSaver,
-    showAmbient: showAmbient, hideAmbient: hideAmbient, setSleep: setSleep, applyDim: applyDim, toast: toast};
+    showAmbient: showAmbient, hideAmbient: hideAmbient, setSleep: setSleep, applyDim: applyDim, toast: toast,
+    bg: function () { return bgUrl; }};
 })();

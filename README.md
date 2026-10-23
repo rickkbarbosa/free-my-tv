@@ -108,8 +108,8 @@ The watchdog build adds headlines and Brazil's severe-weather alerts to the LG a
   sheet to see the notice. Set the city in *Home Settings › City*.
 - **Headlines.** *Home Settings › News* turns them on; the drawer then gets a **News** entry with 8–12 headlines.
   OK opens the story in the TV's browser.
-- **Feeds.** The default list is G1 (Brasil), Omelete, ESPN, Manual do Usuário and TabNews. G1 and Omelete don't
-  send `Access-Control-Allow-Origin`, so a TV can't read them directly: set `feeds_proxy=` in `config.properties` to
+- **Feeds.** The default list is G1 (Brasil), Omelete, TechCrunch, Manual do Usuário and TabNews. G1, Omelete and TechCrunch
+  don't send `Access-Control-Allow-Origin: *`, so a TV can't read them directly: set `feeds_proxy=` in `config.properties` to
   a small proxy of your own (it gets the feed address URL-encoded and answers with
   `Access-Control-Allow-Origin: *`). `rss_feeds=` replaces the list; Omelete has no RSS since 2026, so its entry
   reads the site's JSON API.
@@ -130,6 +130,12 @@ The watchdog build adds headlines and Brazil's severe-weather alerts to the LG a
 - **Ambient clock.** Five minutes without a key press turn the screen into a large clock with the weather, the first
   headline and the weather alert, shifting a few pixels every half minute for OLED panels. *Home Settings ›
   Screensaver* switches between the clock (default here) and the photo screensaver.
+- **Headlines on the top bar.** The strip that carries the weather alert also carries the news: the alert stays on
+  the left (with its colour dot) and the headlines move on the right. *Home Settings › Headlines on the bar*:
+  **Rotating** (one every 7s, the default), **Scrolling** (the marquee, eight headlines in a loop) or **Off**.
+- **News photo behind the home.** *Home Settings › News background* (on by default): the first headline that brings a
+  picture becomes the home's background — the same 48×27 canvas the picks use, so it is cheap. A new photo at most
+  every 15 minutes; when a headline has none (TechCrunch, TabNews), the first pick's backdrop stays.
 - **Ten shelf apps.** The shelf now holds up to 10 apps, and the photo screensaver asks TMDB for `w1280` instead of
   the original file.
 

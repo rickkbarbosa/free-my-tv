@@ -82,7 +82,27 @@ var Feeds = (function () {
     return ms && !isNaN(ms) ? ms : Date.now();
   }
 
-  /** RSS items or Atom entries from an XML document, as [{title, link, at, source}]. */
+  /** A picture for the headline, when the feed carries one: media:content, media:thumbnail, an image enclosure, or the first <img> in the text. */
+  function imageOf(node) {
+    var names = ['media:content', 'media:thumbnail', 'enclosure'];
+    for (var i = 0; i < names.length; i++) {
+      var list = node.getElementsByTagName(names[i]);
+      for (var j = 0; j < list.length; j++) {
+        var url = list[j].getAttribute('url') || '';
+        var type = list[j].getAttribute('type') || '';
+        if (url && (!type || type.indexOf('image') === 0)) return url;
+      }
+    }
+    var html = '';
+    var desc = node.getElementsByTagName('description');
+    if (desc.length) html = desc[0].textContent;
+    var enc = node.getElementsByTagName('content:encoded');
+    if (enc.length) html += enc[0].textContent;
+    var m = /<img[^>]+src=["']([^"']+)["']/i.exec(html);
+    return m ? m[1] : '';
+  }
+
+  /** RSS items or Atom entries from an XML document, as [{title, link, at, source, image}]. */
   function parseXml(xml, fallbackName) {
     var doc = null;
     try { doc = new DOMParser().parseFromString(xml, 'text/xml'); } catch (e) { return []; }
@@ -94,7 +114,7 @@ var Feeds = (function () {
     for (var i = 0; i < nodes.length && out.length < PER_FEED; i++) {
       var n = nodes[i], title = clean(tag(n, ['title']), 150), link = linkOf(n);
       if (!title || !link) continue;
-      out.push({title: title, link: link, at: timeOf(n), source: name});
+      out.push({title: title, link: link, at: timeOf(n), source: name, image: imageOf(n)});
     }
     return out;
   }
@@ -124,9 +144,11 @@ var Feeds = (function () {
       var path = (c.alternative_urls && c.alternative_urls[0]) || c.full_slug || '';
       if (!path) continue;
       var at = c.dates && (c.dates.published_at || c.dates.created_at);
+      var card = c.card_image || (c.featured_image && c.featured_image.path) || '';
+      if (card && card.indexOf('//') === 0) card = 'https:' + card;
       out.push({title: clean(c.title, 150),
         link: path.indexOf('http') === 0 ? path : 'https://www.omelete.com.br/' + path,
-        at: Date.parse(at) || Date.now(), source: 'Omelete'});
+        at: Date.parse(at) || Date.now(), source: 'Omelete', image: card});
     }
     return out;
   }
@@ -134,7 +156,7 @@ var Feeds = (function () {
   var DEFAULTS = [
     {name: 'G1', url: 'https://g1.globo.com/rss/g1/brasil/', kind: 'xml'},
     {name: 'Omelete', url: 'https://www.omelete.com.br/api', kind: 'omelete'},
-    {name: 'ESPN', url: 'https://www.espn.com.br/espn/rss/news', kind: 'xml'},
+    {name: 'TechCrunch', url: 'https://techcrunch.com/feed/', kind: 'xml'},
     {name: 'Manual do Usuário', url: 'https://manualdousuario.net/feed/', kind: 'xml'},
     {name: 'TabNews', url: 'https://www.tabnews.com.br/api/v1/contents?strategy=new&per_page=8', kind: 'json'}
   ];
