@@ -956,7 +956,6 @@
           step: function () { setSleep(n); closeSheets(); }});
       })(opts[i]);
     }
-    rows.push({label: tr('Screen off'), value: tr('Now'), step: function () { closeSheets(); screenOff(); }});
     if (sleepAt) rows.push({label: tr('Cancel timer'), value: sleepMinutes() + ' min', step: function () { cancelSleep(); }});
     rows.push({label: tr('Turn the TV off'), step: function () { closeSheets(); turnOffNow(); }});
     return rows;

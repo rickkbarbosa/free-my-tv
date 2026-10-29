@@ -86,7 +86,7 @@ var TV = (function () {
     try { ws = new WebSocket('ws://127.0.0.1:3000'); } catch (e) { finish(null); return; }
     ws.onopen = function () {
       var payload = {forcePairing: false, pairingType: 'PROMPT',
-        manifest: {manifestVersion: 1, appVersion: '1.0', permissions: ['READ_INSTALLED_APPS']}};
+        manifest: {manifestVersion: 1, appVersion: '1.0', permissions: ['READ_INSTALLED_APPS', 'CONTROL_POWER']}};
       if (key) payload['client-key'] = key;
       ws.send(JSON.stringify({type: 'register', id: 'register', payload: payload}));
     };
@@ -620,11 +620,17 @@ var TV = (function () {
       });
     },
 
-    /** Turns the TV off; done(ok). Not every model answers a third-party app. */
+    /**
+     * Turns the TV off; done(ok). The remote control API first: luna's tvpower/power answers "Denied method call"
+     * to a Developer Mode app (webOS 6, tested), and the API LG's own phone app uses takes the same intent.
+     */
     powerOff: function (done) {
       if (!webos) { if (done) done(false); return; }
-      luna('luna://com.webos.service.tvpower/power/turnOff', {reason: 'remoteKey'}, function (res) {
-        if (done) done(!!res);
+      ssap('system/turnOff', function (res) {
+        if (res) { if (done) done(true); return; }
+        luna('luna://com.webos.service.tvpower/power/turnOff', {reason: 'remoteKey'}, function (r) {
+          if (done) done(!!r);
+        });
       });
     },
 

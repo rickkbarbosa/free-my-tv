@@ -58,7 +58,7 @@ function call(uri, clientKey, done) {
       open = true;
       buf = buf.slice(end + 4);
       var payload = {forcePairing: false, pairingType: 'PROMPT',
-        manifest: {manifestVersion: 1, appVersion: '1.0', permissions: ['READ_INSTALLED_APPS']}};
+        manifest: {manifestVersion: 1, appVersion: '1.0', permissions: ['READ_INSTALLED_APPS', 'CONTROL_POWER']}};
       if (clientKey) payload['client-key'] = clientKey;
       send({type: 'register', id: 'register', payload: payload});
     }
@@ -91,11 +91,15 @@ function call(uri, clientKey, done) {
   socket.on('close', function () { finish(null); });
 }
 
+// The calls the page may make, and only these: the app list, and turning the TV off (the sleep timer; luna's
+// tvpower refuses a Developer Mode app, the remote control API doesn't). Nothing else reaches the TV's API, and
+// the client key never leaves the page.
+var ALLOWED = ['com.webos.applicationManager/listLaunchPoints', 'system/turnOff'];
+
 service.register('ssap', function (message) {
   var p = message.payload || {};
-  // Only the app list, the one call the page makes: nothing else goes to the TV's API, nor gets its client key.
-  if (p.uri !== 'com.webos.applicationManager/listLaunchPoints') {
-    message.respond({returnValue: false, errorText: 'Only listLaunchPoints'});
+  if (ALLOWED.indexOf(p.uri) < 0) {
+    message.respond({returnValue: false, errorText: 'Not allowed'});
     return;
   }
   call(p.uri, p.clientKey, function (result) {
