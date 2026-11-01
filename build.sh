@@ -60,6 +60,7 @@ ASSIST=false; [ "$(prop disable_assistant false)" = "true" ] && ASSIST=true
 CRYPTO=false; [ "$(prop show_crypto true)" = "true" ] && CRYPTO=true
 ANIMATION=false; [ "$(prop hide_animation false)" = "true" ] && ANIMATION=true
 SAVER=true; [ "$(prop screensaver true)" = "false" ] && SAVER=false
+STREMIO=false; [ "$(prop open_in_stremio false)" = "true" ] && STREMIO=true
 
 # Servers on your own network (Immich, and the next feature that needs one) often answer in plain HTTP. One rule for
 # all of them: a server given as http:// must be on the local network, and only its host may skip HTTPS
@@ -94,12 +95,17 @@ lan_server() {   # lan_server <key>: checks it; the host of an http:// one joins
   esac
 }
 lan_server immich_server
+lan_server home_assistant_url
 # Keys that would let another app on the TV into the user's own servers stay out of the APK: tools/send_key.py sends
 # them to the TV (Secrets).
-if [ -n "$(prop immich_api_key '')" ]; then
-  echo "config.properties: immich_api_key isn't built into the app (any app on the TV could read it there)." >&2
-  echo "Send it to the TV instead (python3 tools/send_key.py <TV IP> immich_api_key), then remove it here." >&2
-fi
+for key in immich_api_key home_assistant_token; do
+  if [ -n "$(prop "$key" '')" ]; then
+    echo "config.properties: $key isn't built into the app (any app on the TV could read it there)." >&2
+    echo "Send it to the TV instead (python3 tools/send_key.py <TV IP> $key), then remove it here." >&2
+  fi
+done
+# Home Assistant: with an address and entities, Home Settings gets its Home Assistant row; without, no row at all.
+HA=false; [ -n "$(prop home_assistant_url '')" ] && [ -n "$(prop home_assistant_entities '')" ] && HA=true
 
 rm -rf out && mkdir -p out/gen/io/freemytv out/classes
 cat > out/gen/io/freemytv/Config.java <<EOF
@@ -124,11 +130,15 @@ final class Config {
     static final String HIDE_SERVICES = "$(prop hide_services '')";
     static final String THEME = "$(prop theme auto)";
     static final String IMMICH_SERVER = "$(prop immich_server '')";
+    static final String HA_URL = "$(prop home_assistant_url '')";
+    static final String HA_ENTITIES = "$(prop home_assistant_entities '')";
+    static final boolean HOME_ASSISTANT = $HA;   // home_assistant_url and _entities set: Home Settings shows its row
     static final boolean DISABLE_ASSISTANT = $ASSIST;
     static final boolean SHOW_CRYPTO = $CRYPTO;
     static final boolean HIDE_ANIMATION = $ANIMATION;
     static final boolean SCREENSAVER = $SAVER;   // false: the TV keeps its own
     static final boolean GENERIC = $GENERIC;   // built with --generic, as the APK on GitHub's releases (Updates)
+    static final boolean OPEN_IN_STREMIO = $STREMIO;
 }
 EOF
 
@@ -148,6 +158,7 @@ mkdir -p out/res/xml
 } > out/res/xml/network_security_config.xml
 
 # --- Build
+
 "$BT/aapt2" compile --dir app/res -o out/res.zip
 "$BT/aapt2" compile --dir out/res -o out/res-gen.zip
 # Fonts uncompressed: Android reads them straight from the APK.

@@ -75,12 +75,18 @@ var Prefs = (function () {
     weather: function () { return pick('weather', true); },
     /** OK on the screensaver opens the title it shows, in its app; any other key only closes it (off by default). */
     saverWatch: function () { return pick('saverWatch', false) === true; },
+    /** What the screensaver shows: 'photos' (the picks' photos, as it always has) or 'clock' (a clock and the weather). */
+    saver: function () { return pick('saver', 'photos') === 'clock' ? 'clock' : 'photos'; },
+    /** Dimming over the picture, for a dark room: 'off', 'low', 'medium', 'high' or 'auto' (medium at night). */
+    dim: function () { return pick('dim', 'off'); },
     /** The weather card's forecast: 'hours' (the next 6 hours) or 'days' (the next 5 days). */
     forecast: function () { return pick('forecast', 'hours') === 'days' ? 'days' : 'hours'; },
     quotes: function () { return pick('quotes', CONFIG.showCrypto !== false); },
     coin: function (i) { var c = pick('coins', null); return c ? c[i] !== false : true; },
     /** Picks per tab: 3 (as it was) up to 6. */
     cards: function () { var n = pick('cards', 3); return n < 3 ? 3 : n > 6 ? 6 : n; },
+    /** Cartoons and anime out of the picks (Home Settings), or config.properties' hide_animation. */
+    hideAnimation: function () { return pick('hideAnimation', CONFIG.hideAnimation === true) === true; },
     shelf: function () { return pick('shelf', null); },
     /** The shelf_apps of the build that last set the shelf, so a new one wins once over the TV's choice. */
     shelfConfig: function () { return pick('shelfConfig', ''); },
@@ -100,6 +106,7 @@ var Prefs = (function () {
       if (off) list.push(key);
       this.set('servicesOff', list);
     },
+    openPicks: function () { return pick('openPicks', CONFIG.openPicksIn === 'nuvio' ? 'nuvio' : 'apps'); },
     set: function (name, value) { v[name] = value; save(); this.version++; },
     setCoin: function (i, on) {
       var c = (pick('coins', null) || [true, true, true, true]).slice();
@@ -332,17 +339,20 @@ var Data = (function () {
     fetchingPrices = true;
     var symbols = coins.map(function (i) { return '%22' + COINS[i] + QUOTE + '%22'; }).join(',');
     var path = '/api/v3/ticker/24hr?type=MINI&symbols=%5B' + symbols + '%5D';
-    // Binance.com refuses the US (HTTP 451); Binance.US answers the same call in dollars.
-    var hosts = ['https://api.binance.com', 'https://api.binance.us'];
+    // Binance.com refuses the US (HTTP 451); Binance.US answers the same call in dollars. data-api.binance.vision is
+    // Binance's own address for public market data, with Binance.com's pairs on another domain and certificate chain:
+    // it answers where a network blocks or intercepts api.binance.com (#375). A refusal skips it.
+    var hosts = ['https://api.binance.com', 'https://data-api.binance.vision', 'https://api.binance.us'];
     (function next(h, refused) {
       get(hosts[h] + path, {}, function (err, body) {
         // A pair Binance doesn't list (HTTP 400): the prices go in dollars. Binance.US has only dollar pairs: its 400
         // counts only where Binance.com refuses the US (HTTP 451), not after a timeout or a 5xx there.
-        if (err && err.message === 'HTTP 400' && QUOTE !== 'USDT' && (h === 0 || refused)) { fetchingPrices = false; inDollars(); refreshPrices(); return; }
+        if (err && err.message === 'HTTP 400' && QUOTE !== 'USDT' && (h < 2 || refused)) { fetchingPrices = false; inDollars(); refreshPrices(); return; }
         // Halted: dollars for this run, not saved like the 400's (the market may open again).
         if (!err && QUOTE !== 'USDT' && halted(body)) { fetchingPrices = false; CURRENCY = 'USD'; QUOTE = 'USDT'; refreshPrices(); return; }
         if (err || !parsePrices(body)) {
-          if (h + 1 < hosts.length && !(err && err.message === 'HTTP 400')) next(h + 1, err && err.message === 'HTTP 451');
+          var refusal = !!err && err.message === 'HTTP 451';
+          if (h + 1 < hosts.length && !(err && err.message === 'HTTP 400')) next(refusal ? 2 : h + 1, refused || refusal);
           else fetchingPrices = false;
           return;
         }
@@ -438,7 +448,7 @@ var Data = (function () {
   }
 
   function sourceStamp() {
-    var s = KEY.length + ':' + KEY.slice(-6) + ':' + REGION + (CONFIG.hideAnimation ? ':no-animation' : '');
+    var s = KEY.length + ':' + KEY.slice(-6) + ':' + REGION + (Prefs.hideAnimation() ? ':no-animation' : '');
     for (var i = 0; i < SERVICES.length; i++) s += usable(SERVICES[i][1]) ? '1' : '0';
     return s;
   }
@@ -556,7 +566,7 @@ var Data = (function () {
     });
   }
 
-  /** TMDB's Animation genre (movies and shows: cartoons and anime), left out with hide_animation=true. */
+  /** TMDB's Animation genre (movies and shows: cartoons and anime), left out with Cartoons and anime off. */
   var ANIMATION = 16;
 
   function animated(o) {
@@ -566,7 +576,7 @@ var Data = (function () {
 
   function addPick(list, o, kind) {
     if (!o.backdrop_path) return;
-    if (CONFIG.hideAnimation && animated(o)) return;
+    if (Prefs.hideAnimation() && animated(o)) return;
     list.push({id: o.id, kind: kind, title: kind === 'movie' ? o.title : o.name, backdrop: o.backdrop_path, poster: o.poster_path || '', meta: '', app: null, detailed: false});
   }
 
@@ -599,7 +609,7 @@ var Data = (function () {
       if (!ids.length) { done(new Error("none of the TV's streaming apps are on TMDB (or switched on in Picks from)")); return; }
       var common = '&language=' + lang() + '&watch_region=' + REGION + '&with_watch_monetization_types=flatrate&include_adult=false'
           + '&sort_by=popularity.desc&with_watch_providers=' + encodeURIComponent(ids.join('|'))
-          + (CONFIG.hideAnimation ? '&without_genres=' + ANIMATION : '');
+          + (Prefs.hideAnimation() ? '&without_genres=' + ANIMATION : '');
       var hot = {movie: [], tv: []}, fresh = {movie: [], tv: []};
       each(['movie', 'tv'], function (kind, next) {
         tmdb('/trending/' + kind + '/week?language=' + lang(), function (e, r) {

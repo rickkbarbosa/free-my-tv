@@ -14,8 +14,8 @@ sys.path.insert(0, os.path.join(ROOT, 'tools'))
 import translate  # noqa: E402  (the catalogues and the keys the web app uses)
 
 GENERIC = {'tmdbKey': '', 'tmdbRegion': '', 'latitude': '', 'longitude': '', 'city': '', 'language': 'auto',
-           'currency': '', 'temperature': 'auto', 'theme': 'auto', 'showCrypto': True, 'hideAnimation': False,
-           'hideApps': [], 'shelfApps': [], 'drawerFirst': False,
+           'currency': '', 'temperature': 'auto', 'theme': 'auto', 'showCrypto': True, 'hideAnimation': False, 'hideApps': [],
+           'shelfApps': [], 'drawerFirst': False, 'openPicksIn': 'apps',
            'news': True, 'rssFeeds': [], 'feedsProxy': ''}
 
 
@@ -67,6 +67,7 @@ def read_config(path):
         'hideApps': [s.strip() for s in values.get('hide_apps', '').split(',') if s.strip()],
         'shelfApps': [s.strip() for s in values.get('shelf_apps', '').split(',') if s.strip()],
         'drawerFirst': values.get('drawer_first', 'false').lower() == 'true',
+        'openPicksIn': 'nuvio' if values.get('open_picks_in', '').strip().lower() == 'nuvio' else 'apps',
         'news': values.get('news', 'true').lower() != 'false',
         'rssFeeds': [s.strip() for s in values.get('rss_feeds', '').split(',') if s.strip()],
         'feedsProxy': values.get('feeds_proxy', '').strip(),

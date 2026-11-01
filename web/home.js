@@ -55,9 +55,14 @@
 
   var stage = $('stage'), body = document.body;
 
-  /** The 1920 × 1080 stage fills the window (on the TV it already is 1920 × 1080). */
+  /**
+   * The 1920 × 1080 stage fills the window (on the TV it already is 1920 × 1080). A TV's window only gets shorter for
+   * the keyboard (Samsung's resizes it while the city or key field has focus): there the stage keeps its width and the
+   * keyboard covers its bottom, as in other apps. Fitted to the short window, it shrank into the top left beside a white
+   * band (#399).
+   */
   function fit() {
-    var s = Math.min(window.innerWidth / 1920, window.innerHeight / 1080);
+    var s = TV.name !== 'browser' ? window.innerWidth / 1920 : Math.min(window.innerWidth / 1920, window.innerHeight / 1080);
     stage.style.webkitTransform = stage.style.transform = s === 1 ? '' : 'scale(' + s + ')';
   }
 
@@ -832,7 +837,7 @@
     if (p.rating) meta = (meta ? meta + ' · ' : '') + p.rating.toFixed(1) + '/10';
     el('div', 'meta', info, meta);
     el('div', 'overview', info, p.overview || '');
-    var actions = el('div', 'actions', box), app = Data.appFor(p.app);
+    var actions = el('div', 'actions', box), target = pickTarget(p), app = target && target.app;
     var watch = el('div', 'act' + (app ? '' : ' off'), actions, app ? trf('Watch on {app}', {app: app.title}) : tr('Watch'));
     hover(watch, Z.DETAIL, 0);
     var close = el('div', 'act', actions, tr('Close'));
@@ -1161,8 +1166,14 @@
         step: function (d) { cycle('temperature', ['auto', 'C', 'F'], unit, d); renderPanels(); }},
       {label: tr('Theme'), value: theme === 'light' ? tr('Light') : theme === 'dark' ? tr('Dark') : auto,
         step: function (d) { cycle('theme', ['auto', 'light', 'dark'], theme, d); checkNight(); }},
+      {label: tr('Dim'), value: dimName(),
+        step: function (d) { cycle('dim', ['off', 'low', 'medium', 'high', 'auto'], Prefs.dim(), d); applyDim(); }},
+      {label: tr('Screensaver'), value: saverMode() === 'clock' ? tr('Clock') : tr('Photos'),
+        step: function (d) { cycle('saver', ['photos', 'clock'], saverMode(), d); }},
       {label: tr('Picks per tab'), value: String(Prefs.cards()),
         step: function (d) { Prefs.set('cards', 3 + (Prefs.cards() - 3 + (d || 1) + 4) % 4); renderCards(); }},
+      {label: tr('Cartoons and anime'), toggle: !Prefs.hideAnimation(),
+        step: function () { Prefs.set('hideAnimation', !Prefs.hideAnimation()); Data.refresh(); }},
       {label: tr('Watch from the screensaver'), toggle: Prefs.saverWatch(),
         step: function () { Prefs.set('saverWatch', !Prefs.saverWatch()); }},
       {label: tr('Weather widget'), toggle: Prefs.weather(),
@@ -1197,6 +1208,7 @@
         })(sv[j].key, sv[j].name);
       }
     }
+
     rows.push({label: tr('Headlines on the bar'), opens: true,
       value: barMode() === 'off' ? tr('Off') : barMode() === 'marquee' ? tr('Scrolling') : tr('Rotating'),
       step: function (d) { cycle('bar', ['rotate', 'marquee', 'off'], barMode(), d); renderAlert(); }});
@@ -1207,10 +1219,11 @@
     rows.push({label: tr('Diagnostics'), value: '›', step: function (d) { if (d >= 0) openDiag(); }});
     rows.push({label: tr('Sleep timer'), value: sleepAt ? sleepMinutes() + ' min' : tr('Off'), opens: true,
       step: function (d) { if (d >= 0) openTimer(); }});
-    rows.push({label: tr('Dim'), value: dimName(Prefs.get('dim', 'auto')), opens: true,
-      step: function (d) { cycle('dim', ['off', 'low', 'medium', 'high', 'auto'], Prefs.get('dim', 'auto'), d); applyDim(); }});
-    rows.push({label: tr('Screensaver'), value: saverMode() === 'photos' ? tr('Photos') : tr('Clock'), opens: true,
-      step: function (d) { cycle('saver', ['clock', 'photos'], saverMode(), d); }});
+    if (nuvio()) {
+      var open = Prefs.openPicks();
+      rows.push({label: tr('Open picks in'), value: open === 'nuvio' ? 'Nuvio' : tr('Streaming apps'),
+        step: function (d) { cycle('openPicks', ['apps', 'nuvio'], open, d); }});
+    }
     rows.push({label: tr('Shelf'), value: '›', shelf: true, step: function (d) { if (d >= 0) openShelfEdit(); }});
     rows.push({label: tr('About this TV'), value: '›', about: true, step: function (d) { if (d >= 0) openAbout(); }});
     if (TV.canOpenSettings) rows.push({label: tr('TV Settings'), value: '›', step: function (d) { if (d >= 0) tvSettings(); }});
@@ -1654,9 +1667,26 @@
 
   // MARK: - Opening things
 
-  function launcher(id, name) {
+  /** Nuvio, when the TV has it: picks can open on its page there (Home Settings, Open picks in). LG only for now:
+   *  Samsung's launch passes no data, so Nuvio would open on its Home. */
+  function nuvio() {
+    if (TV.name !== 'webos') return null;
+    for (var i = 0; i < apps.length; i++) if (/nuvio/i.test(apps[i].id) || /^nuvio\b/i.test(apps[i].title)) return apps[i];
+    return null;
+  }
+
+  function pickTarget(p) {
+    if (!p) return null;
+    var via = Prefs.openPicks() === 'nuvio' ? nuvio() : null;
+    var app = via || Data.appFor(p.app);
+    if (!app) return null;
+    // Nuvio's own link for the title, as on Android (nuvio://tmdb/movie/603); webOS apps get links as contentTarget.
+    return {app: app, params: via ? {contentTarget: 'nuvio://tmdb/' + (p.kind === 'tv' ? 'series' : 'movie') + '/' + p.id} : null};
+  }
+
+  function launcher(id, name, params) {
     return function () {
-      TV.launch(id, null, function (ok) {
+      TV.launch(id, params || null, function (ok) {
         if (!ok) toast(trf("Couldn't open {app}.", {app: name || id}));
       });
     };
@@ -1683,6 +1713,7 @@
         else openSettings();
         return;
       case Z.CARDS:
+
         openDetail(cards[st.card]);
         return;
       case Z.NEWS:
@@ -1692,8 +1723,8 @@
         if (timerRowsNow[st.timer]) { timerRowsNow[st.timer].step(); if (st.zone === Z.TIMER) renderTimer(); }
         return;
       case Z.DETAIL:
-        var p = detailPick, app = p && Data.appFor(p.app);
-        if (st.detail === 0 && app) { closeDetail(); launcher(app.id, app.title)(); }
+        var p = detailPick, target = p && pickTarget(p), app = target && target.app;
+        if (st.detail === 0 && app) { closeDetail(); launcher(app.id, app.title, target.params)(); }
         else if (st.detail === 1) closeDetail();
         return;
       case Z.SHELF:
@@ -1886,6 +1917,28 @@
 
   var saverOn = false, idleAt = Date.now(), saverIndex = 0, saverTimer = 0, saverPick = null, SAVER_AFTER = 5 * 60000;
 
+  /** "photos" (the picks' photos, as it always was) or "clock": what the screen shows when nobody touches it. */
+  function saverMode() { return Prefs.saver(); }
+
+  /** Dim, as the person picked it: off, low, medium, high, or automatic (medium from 22:00 to 07:00). */
+  function dimName() {
+    var v = Prefs.dim();
+    return v === 'low' ? tr('dim|Low') : v === 'medium' ? tr('dim|Medium') : v === 'high' ? tr('dim|High')
+      : v === 'auto' ? tr('Automatic') : tr('Off');
+  }
+
+  function dimLevel() {
+    var v = Prefs.dim();
+    if (v === 'auto') { var h = new Date().getHours(); return h >= 22 || h < 7 ? 2 : 0; }
+    return v === 'low' ? 1 : v === 'medium' ? 2 : v === 'high' ? 3 : 0;
+  }
+
+  /** The panel's brightness is a private API: this is a black layer over the picture instead. */
+  function applyDim() {
+    var level = dimLevel();
+    $('dim').className = 'layer' + (level ? ' d' + level : '');
+  }
+
   /** The screensaver's photos: picks with an app on the TV. */
   function saverPhotos() {
     return Data.showcase().filter(function (p) { return p.backdrop && Data.usable(p.app); });
@@ -1915,8 +1968,8 @@
         clock.children[2].textContent = p.title;
         saverPick = p;
         // With Watch from the screensaver on, OK opens this title's app (any other key only closes).
-        var app = Prefs.saverWatch() && Data.appFor(p.app);
-        hint.textContent = app ? trf('Press OK to watch on {app} · any other button to close', {app: app.title}) : '';
+        var target = Prefs.saverWatch() ? pickTarget(p) : null;
+        hint.textContent = target ? trf('Press OK to watch on {app} · any other button to close', {app: target.app.title}) : '';
         setTimeout(function () {
           setClass(back, 'on', true);
           setClass(front, 'on', false);
@@ -1943,29 +1996,20 @@
     setClass($('saver'), 'on', false);
   }
 
-  // MARK: - Ambient: the clock on its own, when the room is quiet
+  // MARK: - The clock screensaver: a clock, the date and the weather, drifting slowly for OLED panels
 
   var ambientOn = false, ambientTimer = 0;
 
-  /** "clock" (the default here) or "photos": what the screen shows when nobody touches it. */
-  function saverMode() { return Prefs.get('saver', 'clock'); }
-
   function showAmbient() {
+    if (ambientOn) return;
     var a = $('ambient');
     a.innerHTML = '';
     var shift = el('div', 'shift', a);
-    var clock = el('div', 'clock', shift, formatDate('format|h:mm', Date.now()));
-    el('div', 'date', shift, formatDate('format|EEEE, MMMM d', Date.now()));
-    var side = el('div', 'side', shift), w = Data.weather;
-    el('div', 'temp', side, w ? Data.degrees(w.temp) : '—');
-    if (w) el('div', 'cond', side, Data.condition(w.code, w.isDay));
-    var item = Feeds.enabled() ? Feeds.items()[0] : null;
-    if (item) {
-      el('div', 'news', side, item.title);
-      el('div', 'src', side, item.source);
-    }
-    var al = Feeds.enabled() ? Feeds.alert() : null;
-    if (al) el('div', 'alertline', side, trf('{event} · {severity}', {event: al.event, severity: al.severity}));
+    el('div', 'clock', shift);
+    el('div', 'date', shift);
+    var side = el('div', 'side', shift);
+    el('div', 'temp', side);
+    el('div', 'cond', side);
     ambientOn = true;
     setClass(a, 'on', true);
     ambientTimer = setInterval(tickAmbient, 30000);
@@ -1974,15 +2018,16 @@
 
   function tickAmbient() {
     if (!ambientOn) return;
-    var a = $('ambient'), clock = a.querySelector('.clock'), shift = a.querySelector('.shift'), d = new Date();
-    if (clock) clock.textContent = formatDate('format|h:mm', d.getTime());
-    var date = a.querySelector('.date');
-    if (date) date.textContent = formatDate('format|EEEE, MMMM d', d.getTime());
-    if (shift) {
-      // A few pixels every half minute: a static clock on an OLED is what burns in.
-      var dx = Math.round(Math.sin(d.getMinutes() * 0.7) * 6), dy = Math.round(Math.cos(d.getMinutes() * 0.9) * 5);
-      shift.style.transform = 'translate(' + dx + 'px,' + dy + 'px)';
-    }
+    var a = $('ambient'), d = new Date(), w = Prefs.weather() ? Data.weather : null;
+    a.querySelector('.clock').textContent = formatDate('format|h:mm', d.getTime());
+    a.querySelector('.date').textContent = formatDate('format|EEEE, MMMM d', d.getTime());
+    // The forecast as it is now (a new one comes every 30 minutes), and only with the weather card on, as on Android.
+    a.querySelector('.temp').textContent = w ? Data.degrees(w.temp) : '';
+    a.querySelector('.cond').textContent = w ? Data.condition(w.code, w.isDay) : '';
+    // A clock that never moves burns into an OLED: the drift of Android's clock without photos (40 × 26 px, 10 minutes).
+    var phase = 2 * Math.PI * (d.getTime() / 1000 % 600) / 600, shift = a.querySelector('.shift');
+    shift.style.webkitTransform = shift.style.transform =
+      'translate(' + Math.round(40 * Math.sin(phase)) + 'px,' + Math.round(26 * Math.sin(2 * phase + 0.7)) + 'px)';
   }
 
   function hideAmbient() {
@@ -1991,23 +2036,8 @@
     setClass($('ambient'), 'on', false);
   }
 
+
   // MARK: - Dim, screen off and the sleep timer
-
-  function dimName(v) {
-    return v === 'low' ? tr('Low') : v === 'medium' ? tr('Medium') : v === 'high' ? tr('High')
-      : v === 'auto' ? tr('Automatic') : tr('Off');
-  }
-
-  function dimLevel() {
-    var v = Prefs.get('dim', 'auto');
-    if (v === 'auto') { var h = new Date().getHours(); return h >= 22 || h < 7 ? 2 : 0; }
-    return v === 'low' ? 1 : v === 'medium' ? 2 : v === 'high' ? 3 : 0;
-  }
-
-  function applyDim() {
-    var level = dimLevel();
-    $('dim').className = 'layer' + (level ? ' d' + level : '');
-  }
 
   var blackOn = false;
 
@@ -2073,13 +2103,13 @@
     if (left <= 0) { sleepAt = 0; saveSleep(); turnOffNow(); return; }
     if (left <= 5 * 60000 && !sleepFive) { sleepFive = true; toast(trf('Turning off in {n} min', {n: 5})); }
   }
-
   function poke(ok) {
     idleAt = Date.now();
+    if (ambientOn) { hideAmbient(); return true; }
     if (!saverOn) return false;
-    var app = ok && saverPick && Prefs.saverWatch() && Data.appFor(saverPick.app);
+    var target = ok && Prefs.saverWatch() ? pickTarget(saverPick) : null;
     hideSaver();
-    if (app) launcher(app.id, app.title)();
+    if (target) launcher(target.app.id, target.app.title, target.params)();
     return true;
   }
 
@@ -2169,6 +2199,7 @@
   /** Back to the home screen (the app was opened again): the shelf, everything closed, the first tab at its first pick. */
   function reset() {
     hideSaver();
+    hideAmbient();
     closeSheets();
     st.zone = Z.SHELF;
     st.shelf = 0;
@@ -2211,7 +2242,7 @@
   document.addEventListener('webOSRelaunch', reopened);   // LG: opened again while running
   window.addEventListener('appcontrol', reopened);        // Samsung: the same
   document.addEventListener('visibilitychange', function () {
-    if (document.hidden) { hideSaver(); return; }
+    if (document.hidden) { hideSaver(); hideAmbient(); return; }
     idleAt = Date.now();
     loadApps(function () { renderShelf(); renderDrawer(); updateFocus(); Data.refresh(); });
   });
@@ -2219,9 +2250,10 @@
   I18N.set(Prefs.language());
   checkNight();   // now, from the last forecast: not after the TV lists its apps, with the day look until then
   // LG's screensaver waits only when ours will show: not under a sheet (ours waits there), and not without photos.
-  TV.holdScreenSaver(function () { return !sheetOpen() && saverPhotos().length > 0; });
+  TV.holdScreenSaver(function () { return !sheetOpen() && (saverMode() === 'clock' || saverPhotos().length > 0); });
   fit();
   renderTop();
+
   renderAlert();
   applyDim();
   tickClock();
@@ -2241,9 +2273,9 @@
     Feeds.refreshAlert();
     savePos();
     tickSleep();
-    applyDim();
+    applyDim();   // automatic: medium from 22:00, off again at 07:00
     if (!blackOn && !saverOn && !ambientOn && !sheetOpen() && Date.now() - idleAt > SAVER_AFTER) {
-      if (saverMode() === 'photos') showSaver(); else showAmbient();
+      if (saverMode() === 'clock') showAmbient(); else showSaver();
     }
     if (saverOn) tickSaverClock($('saver').querySelector('.clock'));
     if (ambientOn) tickAmbient();

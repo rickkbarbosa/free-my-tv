@@ -21,8 +21,11 @@ before you do it, and let them do the taps on the TV.
 - Google TV's setup app (`setupwraith`) goes off before the stock home screen and comes back after it, everywhere
   (`targets` order, `applyOriginal`, `revertHomeNow`, `verifyNow`): with the home screen off and it on, its
   RecoveryActivity takes Home, and a restart there factory-reset a Xiaomi. If it can't go off, the home screen stays on.
-  The Kalley 43G200 (`R3_GTV`) turns it back on at every start and boot-looped without its home screen: the switch
-  refuses there. On Amazon Fire TV (Fire OS: `HomeMode.AMAZON`), Amazon's launcher keeps the Home button (`priority=950`
+  The Kalley 43G200 (`R3_GTV`) turns it back on at every start and boot-looped without its home screen, and a Huawei
+  TV (HarmonyOS) stopped at its logo at the first restart after the switch (back only with a factory reset): the
+  switch refuses on both (`HomeMode.BRICKS`, Huawei by brand or by `com.huawei.system.BuildEx.getOsBrand()`), and
+  the boot check or an update takes one already in Free My TV mode back to *Original*. On a phone (`HomeMode.phone`:
+  telephony, no leanback, not in TV mode) the settings say the APK goes on the TV, and the switch refuses. On Amazon Fire TV (Fire OS: `HomeMode.AMAZON`), Amazon's launcher keeps the Home button (`priority=950`
   on `CATEGORY_HOME`), so the switch refuses Free My TV mode while *Original* and the watchdog still run, and no
   `com.amazon.*` package is ever turned off (`mayTurnOff`).
 - Never turn off an app that saved a Wi-Fi network: Android deletes its networks and Original can't bring them
@@ -51,7 +54,7 @@ before you do it, and let them do the taps on the TV.
    `config.properties`), they add it on the TV themselves: Home Settings > TMDB key (a QR code for their phone, or typed).
    Without a key everything works except the picks and their photos on the screensaver (photos they send themselves
    still show).
-   The same goes for the optional `watchmode_key` (free, watchmode.com; makes picks open the title's page): theirs, secret, only in `config.properties`.
+   The same goes for the optional `watchmode_key` (free, watchmode.com; makes picks open the title's page): theirs, secret, only in `config.properties`, or sent to the TV in Home Settings > Watchmode key.
    And for `plex_url` and `plex_token` (Google TV only; their Plex server's newest titles join the picks): the token opens
    their Plex account, so suggest a Plex Home managed user's (the README says how), and it goes only in `config.properties`.
    The optional Immich key (with `immich_server`, their own Immich server: My Photos come from it) is even more theirs:
@@ -124,7 +127,10 @@ stays, and Free My TV opens with a long press of a number key.
 5. **Install:** the first time needs the TV's passphrase, typed by them: ask them to run
    `python3 webos/install.py <IP>` in their own terminal (yours can't answer its prompt, and the passphrase doesn't go
    in the chat). It keeps the unlocked key in `~/.ssh/freemytv_webos_<IP>` (dots as underscores), so later updates
-   run from your terminal with the same command.
+   run from your terminal with the same command. On a TV that isn't 4K (`getSystemInfo` says `"UHD":"false"`), it
+   changes the package's `resolution` to 1280x720 before copying it: LG's Full HD and HD sets draw apps at that size,
+   and a 2019 HD one (webOS 3.9) showed a 1920x1080 app in its top-left two thirds (#402). `--1080p` installs it as
+   built; `python3 webos/build.py --hd` builds it at 1280x720.
 6. **Tell them:** while Free My TV is open, holding a number key pins it to that key (on a remote without number keys,
    it's in LG's app list on the home screen). Developer Mode lasts about 40 days; *EXTEND* in that app renews it (if
    it runs out, the TV removes developer apps, and installing again brings it back). `--uninstall` removes Free My TV.
@@ -174,7 +180,11 @@ Developer Mode; Samsung's home screen stays. Two ways:
    when the TV says `install completed` (`cmd_ret:0` comes after failures too). `--uninstall` removes
    it; some TVs' sdbd doesn't answer that, and then it's removed on the TV (Apps, Settings, Free My TV, Delete).
    A bare `install failed[118]` (Tizen 2.4 gives no reason) can be a copy left by an earlier failed install, signed
-   with another certificate and not shown on the TV: `--uninstall`, then install again (a 2016 KU6640, #349).
+   with another certificate and not shown on the TV: `--uninstall`, then install again (2016 KU6640 and KU6400, #349;
+   the KU6400 took the Tizen certificate after that, while a Samsung one, Public with its DUID, kept getting 118). Still
+   118 after that, for a package id the TV has never seen and from Samsung's own `tizen install` with an install
+   permit: the model refuses developer installs (a 2016 Full HD K5670, `16_HAWKM_FHD`, #349), so suggest a Google TV
+   streamer on HDMI.
    With Samsung's tools instead: `sdb connect <IP>`, `tizen install -n FreeMyTV-tizen.wgt -t <serial from sdb
    devices>` and `tizen run -p FreeMyTVio.FreeMyTV -t <serial>`. Updates need the same certificate: the TV refuses
    one signed by another (uninstall first). A retail TV's sdbd only takes files (`filesync_support:push`): nothing
@@ -185,7 +195,12 @@ Developer Mode; Samsung's home screen stays. Two ways:
    apps (not the native ones, below).
 8. **Tell them:** *Autorun Last App* in the TV's settings (under Start Screen Options; where it is changes by year)
    makes the TV turn on into Free My TV on a 2017 set; 2019 and 2020 sets don't reopen Developer Mode apps with it
-   (#356), so there they move it to the first place in the Home bar.
+   (#356), so there they move it to the first place in the Home bar. A Tizen Web Service declared `on-boot` that
+   reopens it when the TV comes on worked on a 2019 RU7099 and a 2020 Q80T (a fork's opt-in build, #356), but only
+   signed with a Partner-level distributor certificate bound to that TV's DUID, which the person requests from Samsung
+   with their own account (Samsung decides who gets that level): the release and TizenBrew's builds can't carry it,
+   a build with another author certificate means uninstalling first (Home Settings and the TMDB key go with it), and
+   certificates, their passwords and the DUID never go in the chat.
 
 ## Releases
 
@@ -288,6 +303,8 @@ entries; its system pieces are in `PROTECTED`. USB debugging opens ADB on 5555 t
   port and token, one POST, 5 minutes, and only while that screen shows) behind a QR code (`Qr`, byte mode, level M, after
   Project Nayuki's MIT encoder, whose notice stays in the file), and checks a key with TMDB (`/configuration`) before
   saving it. Never log it. Nothing may escape KeyPage's threads: `:home`'s watchdog counts it as a home screen crash.
+  The Watchmode key has the same screen and page (`Prefs.watchmodeKey`, read through `Recs.watchmodeKey()`, checked with
+  `/status/`), on Google TV and Android TV only.
   On LG and Samsung it's typed in Home Settings (no QR: a web app can't serve a page): `Prefs.tmdbKey()` (localStorage)
   wins over `CONFIG.tmdbKey`, and `Data.keyChanged()` fetches the picks again.
 - Continue Watching gets `READ_TV_LISTINGS` with `pm grant` through the TV's own ADB only when picked in Home Settings;
@@ -340,7 +357,7 @@ entries; its system pieces are in `PROTECTED`. USB debugging opens ADB on 5555 t
 - Settings rows that need something this TV lacks stay, dimmed as *Unavailable*: `SettingsActivity.need` names what a
   row needs, `Capabilities.missing` says why it's missing (once per screen), and OK on the row shows it in a toast.
 - The remote's app buttons (`RemoteKeys`, `RemoteKeyService`) use each brand's key codes: they run only on TCL,
-  Vestel, KTC (NextStar), Sony, Xiaomi and Hisense TVs and Formovie projectors, the service is on only in Free My TV mode, and *Original* takes it out of the enabled accessibility
+  Vestel, KTC (NextStar), Sony, Xiaomi and Hisense TVs, the JVC G24, Formovie projectors and the Google TV Streamer, the service is on only in Free My TV mode, and *Original* takes it out of the enabled accessibility
   services. The system waits for the service on every key, so it lives alone in the `:keys` process: what it reads is
   in `remote-keys.txt` (`Prefs.keyApp`), never in SharedPreferences, and `onKeyEvent` does no heavy work.
   The service is also off while every button is *Nothing*, and always on TCL's Android 11 (`RemoteKeys.FILTER_SAFE`):
@@ -355,7 +372,12 @@ entries; its system pieces are in `PROTECTED`. USB debugging opens ADB on 5555 t
   YouTube and Crunchyroll buttons, `KEYCODE_BUTTON_4` for Netflix and `KEYCODE_BUTTON_8` for the Google Play button of
   older remotes (BRAVIA 4K UR3, Android 10 tested), global keys for `com.sony.dtv.sonyvendorservice`;
   only the scan code tells them apart, so `Prefs` keys them as `SONY_KEY` + scan code. "Sony default" (empty) leaves
-  the key to the TV. Sony ships its own Apple TV build, `com.apple.atve.sony.appletv`.
+  the key to the TV. The BRAVIA VU31's remote (Realtek, Google TV 14, #395) sends `BUTTON_4` with scan code 758 for
+  Netflix, `BUTTON_2` (652) for Prime Video, `BUTTON_15` (653) for YouTube and key code 3004 for SonyLIV; `Prefs.sonyKey`
+  puts the first three on the same rows. There the TV hands the buttons to launcherx, so with it off "Sony default" does
+  nothing: on a Sony with launcherx installed (`Prefs.sonyGoogleTv`) the buttons default to their apps. Another remote's
+  codes go in `sonyKey` the same way, as long as they don't clash with a known one. Sony ships its own Apple TV build,
+  `com.apple.atve.sony.appletv`.
   Xiaomi projectors made by Formovie (Fengmi; L1, MediaTek, Google TV 14 tested) send the same `KEYCODE_STEM_1` for
   Netflix (`RemoteKeys.STEM_NETFLIX`); their YouTube button goes to MediaTek's `GlobalKeyReceiver` and stays with the system.
   Some Xiaomi TVs (MiTV-MSSP3, MediaTek, Android TV 9 tested) have no Home button on the remote (`RemoteKeys.XIAOMI`
@@ -385,7 +407,53 @@ entries; its system pieces are in `PROTECTED`. USB debugging opens ADB on 5555 t
   opens TV Settings and All Apps opens our own sheet (`Prefs.ALL_APPS`, `HomeActivity.EXTRA_ALL_APPS`); the profile
   button has nothing to open without `launcherx`. Hisense keeps only error logs: `adb shell setprop log.tag.FreeMyTV I`
   before reading `adb logcat -s FreeMyTV`.
+  TCL's Settings button sends `KEYCODE_NOTIFICATION`, which only Google TV's home app (launcherx, off in our mode)
+  answers with its quick settings panel. It is a *Remote Buttons* row (`Prefs.KEY_TCL_SETTINGS`) whose default is TV
+  Settings (`com.android.tv.settings`, as #289 does from the home screen); its choice `Prefs.QUICK_PANEL` makes
+  `RemoteKeys` open `QuickPanelActivity`, and *Nothing* leaves the key alone (`HomeView` too, as for Hisense). On TCL's
+  Android 11 the key service is off (#325), so there the row works on the home screen only. The panel is our own, over
+  what's playing (a window on the left, drawn as glass since TVs turn window blur off), whose tiles open the TV's own screens
+  (TCL's Picture and Sound panels through `DISPLAY_SETTINGS` and `VIEW_SOUND_SETTINGS`; TCL Google TV 14 tested).
+  The Google TV Streamer (`RemoteKeys.GOOGLE_STREAMER`: model `Google TV Streamer`, device `kirkwood`, Android 14
+  tested) maps YouTube to `BUTTON_3`, Netflix to `BUTTON_4` and its custom star button to `MACRO_1` (313, API 34), from
+  `Vendor_18d1_Product_9451.kl`. YouTube and the star go to launcherx; Netflix goes to chromecastservice. The model
+  check excludes Chromecasts and other Google devices. YouTube opens YouTube initially; Netflix and the star stay
+  with Google until an app is picked. An empty choice (*Google default*) passes the key through, so YouTube and the
+  star may do nothing with launcherx off. All three can also open Free My TV's All Apps; there is no separate
+  long-press mapping. Home, Back, voice, power and volume stay with the system.
+  The JVC G24 (Skyworth, Android 11 tested; `RemoteKeys.JVC_SKYWORTH`, by model name and Android version) sends its
+  Inputs button as `KEYCODE_BUTTON_16` with scan code 383 (Bluetooth) or 79 (IR), or as `BUTTON_14` with 240, and its
+  gear as `KEYCODE_NOTIFICATION` (`SkyworthRemote`; `BUTTON_16` with other scan codes is its app buttons, which stay
+  with the system). In Free My TV mode the Inputs button's vendor receiver crashes on Google TV's disabled provider and
+  the gear asks for Google TV's disabled panel, so Inputs opens `com.smartdevice.dailyshortcut` directly
+  (`Prefs.TV_SHORTCUTS`) and the gear our own small Quick Settings panel (`QuickSettingsActivity`). Leaving Google TV's
+  home app on is no way around it there: its Home priority wins over ours. `tools/test-remote.sh` (run by
+  `tools/check.sh`) checks which TVs and keys match.
   `adb shell input keyevent` doesn't test any of these: injected keys skip the accessibility key filter.
+- Recent Apps (`RecentApps`, over a 96×54 `ScreenBlur` copy of the window) is off by default: *Home Settings* →
+  *Recent Apps* (`Prefs.recents()`: `off`, `drawer`, `home`) adds the drawer shortcut and the app-switch key, and `home`
+  also two Home presses within 700 ms (`HomeActivity.onNewIntent`; not offered on Xiaomi TVs, whose remote sends one
+  press as a burst); Top Buttons can add it on its own. Only while it's open, it reads the list through the TV's ADB
+  (`dumpsys activity recents`, `ps -A -o NAME`), and ▲ runs `am force-stop`.
+  A card may be closed only where `HomeMode.mayStop` allows it (`mayTurnOff`, plus Amazon's streaming apps) and the app holds neither an enabled accessibility
+  service (Android turns a force-stopped app's service off for good) nor the current keyboard, and only if
+  `HomeMode.neededByTv` doesn't keep it (the TV's inputs and the remote's Input key, as before a switch). Its loads carry a
+  generation (only the newest answers) and catch every exception: `:home`'s watchdog counts a crash there. It draws
+  only while something moves, hides the layers under it once it covers the screen, and TalkBack reads its cards
+  (`RECENT_CARDS`) instead of the home screen. Once closed (`isOpen()`), while it fades out, the keys and TalkBack are
+  the home screen's again.
+- Home Assistant buttons (`HomeAssistant`): `home_assistant_url` and `_entities` in `config.properties` go into the build
+  (`Config.HOME_ASSISTANT`: only then does Home Settings have its *Home Assistant* row, off by default). The token never
+  does (any app can read an installed APK, and a token reaches every service): it's theirs and secret, like `tmdb_key`,
+  and they send it themselves with `python3 tools/send_key.py <IP> home_assistant_token` (`Secrets`, as the Immich key;
+  it checks the token with the server and lists what each entity becomes first; don't ask for it in the chat). Until
+  it's there the row shows Unavailable (`Capabilities.NEED_HOME_ASSISTANT`). On, the entities are a
+  third group of tiles in the bottom drawer (`HomeApps.HOME_ASSISTANT`), read when it opens and every 30 s while it's
+  open, and OK calls their service (`/api/services`). Only `HomeAssistant.DOMAINS`, at most 8: locks and alarms are
+  never offered, and covers only of `HomeAssistant.SAFE_COVERS` (awning, blind, curtain, shade, shutter; not garage
+  doors, gates, doors or a cover with no class), once its class is read. The UI thread never reads the token file
+  (`itemsNow`, `onNow`). Redirects aren't followed. The address goes through `lan_server` in `build.sh`: plain HTTP
+  only to the local network.
 - What's playing (`NowPlaying`) comes from the apps' media sessions, which Android hands only to an allowed notification
   listener. A listener could read every notification, so ours follows Home Settings' *Now Playing widget* (off by
   default): turning it on allows it through ADB (`HomeMode.nowPlayingAccess`, `cmd notification allow_listener`; the
@@ -397,6 +465,15 @@ entries; its system pieces are in `PROTECTED`. USB debugging opens ADB on 5555 t
   It unbinds itself as soon as it connects (the permission is all it's for), and the home screen and the screensaver
   watch the sessions only while they show. The line is cut to fit when the title changes, never while drawing; the
   home screen's bars bounce again only for a new title (`Watch.title`), and TalkBack announces it then.
+- *At power-on* (Home Settings, `Prefs.powerOn()`: `tv`, the default, `home` or `live`; #396, #346) acts only after a
+  full start, never on a wake from standby. `HomeActivity` keeps the uptime of the first time the home screen came up
+  in this start (`HomeMode.noteHomeShown`, the file `home-shown` with `Settings.Global.BOOT_COUNT`). `live`: 10 s later,
+  if no key reached our window and it's still in front, it opens Live TV as the button does. `home`: a `POWER_ON` job
+  10 s after boot, for up to a minute, sends the HOME intent through the TV's ADB when an app of `LIVE_TV_APPS` is in
+  front and `dumpsys power`'s last user activity (`mLastUserActivityTime`; `lastUserActivityTime` per display group on
+  Android 14) is still older than that uptime (a key moves it; a Changhong on
+  MediaTek stamped it once at 23 s, Home came up at 26 s and its TV center took the screen at 27 s). An unreadable
+  stamp counts as a key: nothing moves.
 - *Status icons* (Home Settings, off by default): Wi-Fi or Ethernet, Bluetooth audio (A2DP and headset only: a
   Bluetooth remote is always connected) and a mounted removable drive. Nothing listens while the row is off; Android
   12+ asks for `BLUETOOTH_CONNECT` (*Nearby devices*) when it's turned on, and without it only that icon is missing.
@@ -477,7 +554,9 @@ entries; its system pieces are in `PROTECTED`. USB debugging opens ADB on 5555 t
   forecast go in the clear). On Tizen 2.3 (2015) Netflix, YouTube and Amazon are native apps whose ids start with a
   number (`11101200001.Netflix`, `111299001912.YouTube`, `111299001578.Amazon_Video`, listed as "Amazon Video"):
   `tizen.application.launch` doesn't open them, the TV's DIAL server does (`POST http://127.0.0.1:8001/ws/apps/<name>`,
-  `dialLaunch`). `web/tv.js` is the
+  `dialLaunch`). On Tizen 3 and 4 (2017 and 2018) `launch` answers success for Netflix and it stays black (#257); Smart
+  Hub's number for it through the same server's REST API opens it, as phones do (`POST
+  /api/v2/applications/11101200001`, `hubLaunch`; the TV may ask once whether to allow it). `web/tv.js` is the
   TV's side: on LG, Luna (`listLaunchPoints`, `launch`, the inputs; where webOS 6 and newer deny `listLaunchPoints`
   to Developer Mode apps, the list comes from the TV's remote control API on `ws://127.0.0.1:3000` once the TV has
   allowed it (it asks once; a "no" isn't asked again; firmware that gives the page its own origin,

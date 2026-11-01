@@ -317,10 +317,10 @@ final class Trakt {
                 if (tmdb <= 0) continue;
                 Seen item = new Seen();
                 item.key = (type.equals("show") ? "tv" : "movie") + ":" + tmdb;
-                item.at = watchedAt;
+                item.at = watchedAt.compareTo(updatedAt) > 0 ? watchedAt : updatedAt;
                 item.trakt = trakt;
                 out.add(item.key);
-                at.put(item.key, watchedAt.compareTo(updatedAt) > 0 ? watchedAt : updatedAt);
+                at.put(item.key, item.at);
                 if (type.equals("show")) seen.add(item);
             }
             r.endArray();

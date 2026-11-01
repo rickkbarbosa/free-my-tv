@@ -1,6 +1,9 @@
 package io.freemytv;
 
+import android.app.UiModeManager;
 import android.content.Context;
+import android.content.pm.PackageManager;
+import android.content.res.Configuration;
 import android.os.Build;
 import android.os.SystemClock;
 
@@ -48,6 +51,43 @@ final class HomeMode {
      * refuses Free My TV mode while Original and the watchdog still run.
      */
     static final boolean AMAZON = "Amazon".equalsIgnoreCase(Build.MANUFACTURER) || "Amazon".equalsIgnoreCase(Build.BRAND);
+
+    /**
+     * Where switching the home screen kept a TV from starting again, so the switch refuses Free My TV mode and a TV
+     * already in it goes back to Original. Kalley 43G200 turns Google TV's setup app back on at every start: without its
+     * home screen the next start looped at the logo, and that TV only came back with a USB reflash (CleanYourTV,
+     * examples/kalley-43g200). A Huawei TV (HarmonyOS) stopped at its logo at the first restart after the switch, and
+     * only a factory reset brought it back (10-29).
+     */
+    static final boolean BRICKS = "R3_GTV".equals(Build.DEVICE) || huawei();
+
+    /** Huawei's TVs and boxes, and anything on HarmonyOS (Huawei's BuildEx says so). */
+    private static boolean huawei() {
+        if ("HUAWEI".equalsIgnoreCase(Build.MANUFACTURER) || "HUAWEI".equalsIgnoreCase(Build.BRAND)) return true;
+        try {
+            Object brand = Class.forName("com.huawei.system.BuildEx").getMethod("getOsBrand").invoke(null);
+            return "harmony".equalsIgnoreCase(String.valueOf(brand));
+        } catch (ReflectiveOperationException | RuntimeException | LinkageError e) {   // not there: not HarmonyOS
+            return false;
+        }
+    }
+
+    /**
+     * A phone, not a TV (telephony, and neither Android TV's features nor the TV mode): the APK was installed in the
+     * wrong place. The settings say so, and the switch refuses: a TV home screen on a phone answers no touch.
+     */
+    static boolean phone(Context c) {
+        PackageManager pm = c.getPackageManager();
+        if (pm.hasSystemFeature(PackageManager.FEATURE_LEANBACK) || pm.hasSystemFeature(PackageManager.FEATURE_TELEVISION)) return false;
+        UiModeManager mode = c.getSystemService(UiModeManager.class);
+        if (mode != null && mode.getCurrentModeType() == Configuration.UI_MODE_TYPE_TELEVISION) return false;
+        return pm.hasSystemFeature(PackageManager.FEATURE_TELEPHONY);
+    }
+
+    /** What the settings and the refused switch say on a phone. */
+    static String phoneText() {
+        return Ui.tr("Free My TV is a TV app: install this APK on your Android TV or Google TV (freemytv.io), not on a phone.");
+    }
 
     /** Classic Android TV's home screen; its recommendations service crashes on the screensaver while it's off (#11). */
     static final String TV_LAUNCHER = "com.google.android.tvlauncher";
@@ -146,6 +186,7 @@ final class HomeMode {
         "com.smartdevice.livetv", "com.smartdevice.livetv.overlay_SANLUX", "com.smartdevice.bleconnectservice",
         "com.smartdevice.duplebluetooth", "com.smartdevice.myapp", "com.smartdevice.setupwraith",
         "com.smartdevice.aftersale", "com.smartdevice.factory", "com.smartdevice.dailymanage",
+        "com.smartdevice.global.service", "com.smartdevice.dailyshortcut", "com.smartdevice.service", // remote, quick settings, system
         "com.smartdevice.dtv.icast", "com.smartdevice.leanbacklauncher.customizer", "com.mediatek.OledFuctionService",
         "com.mediatek.android.boot.appsplashscreen", "com.mediatek.android.leanbacklauncher.partnercustomizer",
         // KTC (NextStar; MediaTek): live TV and tuners, setup, settings, updates, casting, remote pairing, factory menus
@@ -200,8 +241,17 @@ final class HomeMode {
         return FACTORY.matcher(pkg).matches();
     }
 
+    /** Amazon's streaming apps, not part of the system on any TV: Recent Apps may close them (mayTurnOff still refuses them). */
+    private static final Set<String> AMAZON_APPS = new HashSet<>(Arrays.asList(
+            "com.amazon.amazonvideo.livingroom", "com.amazon.music.tv"));
+
+    /** Recent Apps' ▲: what may be turned off, and Amazon's streaming apps, which only stop. */
+    static boolean mayStop(String pkg) {
+        return mayTurnOff(pkg) || AMAZON_APPS.contains(pkg) && !PROTECTED.contains(pkg);
+    }
+
     /** Checked before every disable: never the protected list, Amazon's packages, Android's own pieces or a factory menu. */
-    private static boolean mayTurnOff(String pkg) {
+    static boolean mayTurnOff(String pkg) {
         return !PROTECTED.contains(pkg) && !pkg.startsWith("com.amazon.")
                 && !CORE.matcher(pkg).matches() && !FACTORY.matcher(pkg).matches();
     }
@@ -212,7 +262,7 @@ final class HomeMode {
      * the receiver of the remote's Input key and Bluetooth pairing (fusion.android.tv.demo on several MediaTek boards).
      * null when the check didn't finish: then none of them goes off this time.
      */
-    private static Set<String> neededByTv(Adb adb, Set<String> pkgs) throws IOException {
+    static Set<String> neededByTv(Adb adb, Set<String> pkgs) throws IOException {
         Set<String> keep = new HashSet<>();
         if (pkgs.isEmpty()) return keep;
         // Only the package's own requested permissions: a shared user's would match by mistake. A line per package keeps
@@ -254,6 +304,104 @@ final class HomeMode {
         if (AMAZON) return;
         ensureRemoteService(c, 30_000);
         ModeJob.schedule(c, ModeJob.VERIFY, null, 45_000);
+        Prefs.reload();
+        if ("home".equals(Prefs.powerOn())) ModeJob.schedule(c, ModeJob.POWER_ON, null, 10_000);
+    }
+
+    // MARK: - At power-on (Home Settings, #396 and #346): only after a full start, never when the TV wakes from standby
+
+    private static File homeShownFile(Context c) {
+        return new File(c.getFilesDir(), "home-shown");
+    }
+
+    private static int bootCount(Context c) {
+        return android.provider.Settings.Global.getInt(c.getContentResolver(), android.provider.Settings.Global.BOOT_COUNT, -1);
+    }
+
+    /**
+     * The home screen came up (:home, HomeActivity). Keeps the uptime of the first time in this start, the moment a key
+     * would have to come after to count as the person's. True when this was that first time.
+     */
+    static boolean noteHomeShown(Context c) {
+        int boot = bootCount(c);
+        if (boot < 0 || homeShownAt(c) != 0) return false;
+        try (FileOutputStream out = new FileOutputStream(homeShownFile(c))) {
+            out.write((boot + " " + SystemClock.uptimeMillis()).getBytes(StandardCharsets.US_ASCII));
+            return true;
+        } catch (IOException e) {
+            return false;
+        }
+    }
+
+    /** When the home screen first came up in this start (uptime), or 0. */
+    private static long homeShownAt(Context c) {
+        try (FileInputStream in = new FileInputStream(homeShownFile(c))) {
+            byte[] data = new byte[48];
+            int n = in.read(data);
+            String[] saved = n > 0 ? new String(data, 0, n, StandardCharsets.US_ASCII).trim().split(" ") : new String[0];
+            return saved.length == 2 && saved[0].equals(String.valueOf(bootCount(c))) ? Long.parseLong(saved[1]) : 0;
+        } catch (IOException | NumberFormatException e) {
+            return 0;
+        }
+    }
+
+    private static final Pattern UPTIME = Pattern.compile("^(\\d+)(\\s|$)");
+    private static final Pattern RESUMED = Pattern.compile("u\\d+ ([\\w.]+)/");
+
+    /**
+     * The power manager's last user activity (uptime ms, "310962 (5000 ms ago)"; the latest of its display groups), or
+     * MAX_VALUE where it reads otherwise: then nothing counts as untouched.
+     */
+    private static long lastUserActivity(Adb adb) throws IOException {
+        long last = -1;
+        for (String line : adb.shell("dumpsys power | grep -i 'lastUserActivityTime='").split("\n")) {
+            int at = line.indexOf('=');
+            if (at < 0) continue;
+            Matcher m = UPTIME.matcher(line.substring(at + 1).trim());
+            if (!m.find()) return Long.MAX_VALUE;
+            last = Math.max(last, Long.parseLong(m.group(1)));
+        }
+        return last < 0 ? Long.MAX_VALUE : last;
+    }
+
+    /**
+     * The package of the activity in front, or null. Android 9 to 11 write "mResumedActivity:", 12 and 13
+     * "topResumedActivity=", 14 "Resumed:" (top first); all of them "ResumedActivity:" too.
+     */
+    private static String resumedPackage(Adb adb) throws IOException {
+        Matcher m = RESUMED.matcher(adb.shell("dumpsys activity activities | grep -m 3 -E 'ResumedActivity|Resumed:'"));
+        return m.find() ? m.group(1) : null;
+    }
+
+    /**
+     * At power-on "Home screen": some MediaTek TV centers put themselves on top about a second after the home screen
+     * comes up at boot ("Please scan channels" where there's no antenna, #396). Gives the screen back to ours, but only
+     * while no key has been pressed since our home screen first came up, and only in the first 4 minutes.
+     */
+    static void powerOnNow(Context app) {
+        Prefs.reload();
+        if (!"home".equals(Prefs.powerOn())) return;
+        List<String> tvApps = Arrays.asList(HomeApps.LIVE_TV_APPS);
+        for (int i = 0; i < 6 && SystemClock.elapsedRealtime() < 240_000; i++) {
+            if (i > 0) SystemClock.sleep(10_000);
+            long shown = homeShownAt(app);
+            if (shown == 0) continue;   // our home screen isn't up yet
+            synchronized (RUN) {   // never in the middle of a switch or the boot check's changes
+                JSONObject s = state(app);
+                if (!FREE.equals(s.optString("mode")) || s.optBoolean("homeReverted")) return;
+                try (Adb adb = Adb.connect(app, 10_000, null)) {
+                    if (lastUserActivity(adb) >= shown) return;   // a key since: what's in front is their choice
+                    String front = resumedPackage(adb);
+                    if (front != null && tvApps.contains(front)) {
+                        adb.shell("am start -a android.intent.action.MAIN -c android.intent.category.HOME");
+                        AppLog.w("at power-on: " + front + " took the screen before any key, back to the home screen");
+                        return;
+                    }
+                } catch (IOException e) {
+                    AppLog.w("at power-on: " + e.getMessage());
+                }
+            }
+        }
     }
 
     /** After an update of this app: complete Free My TV mode if anything is missing. */
@@ -263,9 +411,10 @@ final class HomeMode {
 
     /**
      * The remote's app buttons (RemoteKeys) need an accessibility service that only filters those keys. It is on only
-     * on TCL, Vestel, KTC, Sony, Xiaomi and Hisense TVs (and Formovie projectors) in Free My TV mode, and goes off with Original. Android turns it off when this app is updated, so the
-     * boot check and an update turn it back on. A change in Remote Buttons asks again: with every button on Nothing,
-     * and on TCL's Android 11, it goes off (RemoteKeys.serviceWanted).
+     * on TCL, Vestel, KTC, Sony, Xiaomi and Hisense TVs and the JVC G24 (and Formovie projectors and the Google TV
+     * Streamer) in Free My TV mode, and goes off with Original. Android turns it off when this app is updated, so the
+     * boot check and an update turn it back on. A change in Remote Buttons asks again: with every button on Nothing
+     * (or the brand's default), and on TCL's Android 11, it goes off (RemoteKeys.serviceWanted).
      */
     static void ensureRemoteService(Context c, long delayMs) {
         if (RemoteKeys.supported()) ModeJob.schedule(c, ModeJob.REMOTE, null, delayMs);
@@ -374,10 +523,12 @@ final class HomeMode {
             done(c, Ui.tr("On Fire TV the Home button belongs to Amazon's home screen. Free My TV stays an app here: open it from your apps."));
             return;
         }
-        // Kalley 43G200 turns Google TV's setup app back on at every start: without its home screen the next start
-        // looped at the logo, and that TV only came back with a USB reflash (CleanYourTV, examples/kalley-43g200).
-        if ("R3_GTV".equals(Build.DEVICE)) {
-            done(c, Ui.tr("On this TV model, switching the home screen kept a TV from starting. Free My TV stays an app here: open it from your apps."));
+        if (BRICKS) {
+            done(c, bricksText());
+            return;
+        }
+        if (phone(c)) {
+            done(c, phoneText());
             return;
         }
         try (Adb adb = connect(c, s)) {
@@ -463,7 +614,7 @@ final class HomeMode {
                 busy(c, Ui.trf("Turning off apps ({done}/{total})…", "done", done, "total", targets.size()));
                 if (!candidates.contains(pkg) || needed.contains(pkg) || owners.contains(pkg) || keptOff.contains(pkg)) continue;
                 // The TV's home screen only once Google TV's setup app is off: its recovery screen would take Home.
-                if (pkg.equals(homePkg) && setupOn) {
+                if (tvHome(pkg, homePkg) && setupOn) {
                     AppLog.w("kept the TV's home screen on: Google TV's setup app is still on");
                     continue;
                 }
@@ -501,6 +652,10 @@ final class HomeMode {
         } catch (Exception e) {
             done(c, Ui.trf("Couldn't turn on Free My TV: {error}", "error", e.getMessage()));
         }
+    }
+
+    static String bricksText() {
+        return Ui.tr("On this TV model, switching the home screen kept a TV from starting. Free My TV stays an app here: open it from your apps.");
     }
 
     private static void applyOriginal(Context c) {
@@ -634,6 +789,9 @@ final class HomeMode {
                     AppLog.w("could not give the home screen back");
                     return;
                 }
+                // Google TV's home too, where the switch turned it off along with another launcher (targets).
+                String googleHome = packageOf(GOOGLE_HOME);
+                if (stringList(s, "disabled").contains(googleHome) && !keptOff.contains(googleHome)) adb.shell("pm enable " + googleHome);
                 // Google TV's setup app only now, with its home screen back (alone, its recovery screen takes Home).
                 if (!keptOff.contains(GOOGLE_SETUP) && adb.shell("pm path " + GOOGLE_SETUP).contains("package:")) {
                     adb.shell("pm enable " + GOOGLE_SETUP);
@@ -650,7 +808,7 @@ final class HomeMode {
                 JSONArray kept = new JSONArray();
                 Set<String> stillOff = new HashSet<>();
                 for (String pkg : stringList(s, "disabled")) {
-                    if (!pkg.equals(GOOGLE_SETUP) && !pkg.equals(homePkg) && !pkg.equals(dreamPkg) && !(jm && pkg.equals(HTC_HOME))) {
+                    if (!pkg.equals(GOOGLE_SETUP) && !tvHome(pkg, homePkg) && !pkg.equals(dreamPkg) && !(jm && pkg.equals(HTC_HOME))) {
                         kept.put(pkg);
                         stillOff.add(pkg);
                     }
@@ -691,6 +849,13 @@ final class HomeMode {
                 save(app, s);
             } catch (JSONException ignored) {}
             if (!FREE.equals(s.optString("mode")) || AMAZON) return;
+            if (BRICKS) {
+                // Switched by a version that still allowed it here: the TV's own home screen back before the next restart.
+                AppLog.w("Free My TV mode where the switch kept a TV from starting: back to Original");
+                applyOriginal(app);
+                notice(app, bricksText());
+                return;
+            }
             List<String> fixed = new ArrayList<>();
             try (Adb adb = Adb.connect(app, 10_000, null)) {
                 try {   // as the widget says: a TV update can take it back, and a take-back can have failed
@@ -710,13 +875,14 @@ final class HomeMode {
                     owners = new HashSet<>();
                     wait.add(GOOGLE_SETUP);
                     if (homePkg != null) wait.add(homePkg);
+                    wait.add(packageOf(GOOGLE_HOME));   // a home screen too (targets)
                 }
                 Set<String> wanted = new HashSet<>(stringList(s, "disabled"));
                 String dream = originalDream(s);
                 // In the switch's order (Google TV's setup app before its home screen), then the rest.
                 List<String> order = new ArrayList<>();
                 for (String pkg : targets(home, dream, s.optBoolean("setupHome", true))) {
-                    if (!reverted || !(pkg.equals(homePkg) || pkg.equals(GOOGLE_SETUP) || pkg.equals(packageOf(dream)))) {
+                    if (!reverted || !(tvHome(pkg, homePkg) || pkg.equals(GOOGLE_SETUP) || pkg.equals(packageOf(dream)))) {
                         wanted.add(pkg);
                         order.add(pkg);
                     }
@@ -738,6 +904,12 @@ final class HomeMode {
                 // Off before Free My TV: turned off again if a TV update brings one back, but never handed to
                 // Original to turn on.
                 List<String> keptOff = stringList(s, "keptOff");
+                // Switched before Google TV's home was a target beside another launcher: off now and not by us, the
+                // person turned it off (their launcher needs that), so it's theirs and Original leaves it off.
+                String googleHome = packageOf(GOOGLE_HOME);
+                boolean theirs = !googleHome.equals(homePkg) && disabledNow.contains(googleHome)
+                        && !disabled.contains(googleHome) && !keptOff.contains(googleHome);
+                if (theirs) keptOff.add(googleHome);
                 Set<String> candidates = new HashSet<>();
                 for (String pkg : wanted) {
                     if (present.contains(pkg) && !keptOff.contains(pkg) && mayTurnOff(pkg)) candidates.add(pkg);
@@ -777,7 +949,7 @@ final class HomeMode {
                         continue;
                     }
                     if (needed.contains(pkg)) continue;
-                    if (pkg.equals(homePkg) && setupOn) {
+                    if (tvHome(pkg, homePkg) && setupOn) {
                         AppLog.w("kept the TV's home screen on: Google TV's setup app is still on");
                         continue;
                     }
@@ -790,11 +962,13 @@ final class HomeMode {
                 // The switch's own rule, at every check: the TV's home screen stays on while Google TV's setup app is
                 // on. With the home off, the setup app's recovery screen takes Home, and a TV that turns the setup app
                 // back on at every start may not start at all (#269). Versions before 1.2 could leave it that way.
-                if (setupOn && homePkg != null && !homePkg.equals(PKG) && disabledNow.contains(homePkg)
-                        && adb.shell("pm enable " + homePkg).contains("new state: enabled")) {
-                    disabled.remove(homePkg);
-                    disabledNow.remove(homePkg);
-                    AppLog.w("turned the TV's home screen back on: Google TV's setup app is on");
+                for (String tv : new String[] {homePkg, packageOf(GOOGLE_HOME)}) {
+                    if (setupOn && tv != null && !tv.equals(PKG) && disabledNow.contains(tv)
+                            && adb.shell("pm enable " + tv).contains("new state: enabled")) {
+                        disabled.remove(tv);
+                        disabledNow.remove(tv);
+                        AppLog.w("turned the TV's home screen back on: Google TV's setup app is on");
+                    }
                 }
                 if (!reverted && !homeHolder(adb).contains(PKG)) {
                     adb.shell("cmd package set-home-activity " + HOME_ACTIVITY);
@@ -812,6 +986,7 @@ final class HomeMode {
                 record(adb, disabled);
                 JSONObject latest = state(app);
                 latest.put("disabled", new JSONArray(sorted(disabled)));
+                if (theirs) latest.put("keptOff", new JSONArray(keptOff));
                 save(app, latest);
             } catch (Exception e) {
                 notice(app, Ui.trf("Couldn't check Free My TV: {error}", "error", e.getMessage()));
@@ -837,6 +1012,10 @@ final class HomeMode {
         String homePkg = home.contains("FallbackHome") ? null : packageOf(home);
         if (setupHome) out.add(GOOGLE_SETUP);
         if (homePkg != null && !homePkg.equals(PKG)) out.add(homePkg);
+        // Another launcher was the home screen (Projectivy on a Chromecast): Google TV's own is still there, and its
+        // higher priority takes the Home button from ours (packages the TV lacks are skipped).
+        String googleHome = packageOf(GOOGLE_HOME);
+        if (!googleHome.equals(homePkg)) out.add(googleHome);
         if (TV_LAUNCHER.equals(homePkg)) out.add(TV_RECOMMENDATIONS);
         String dreamPkg = packageOf(dream);
         // screensaver=false keeps the TV's own screensaver: then it stays on.
@@ -1035,6 +1214,11 @@ final class HomeMode {
         return d.contains("/") && !d.startsWith(PKG + "/") ? safeComponent(d) : "";
     }
 
+    /** The recorded home screen or Google TV's: both stay on while Google TV's setup app is on, and after a revert. */
+    private static boolean tvHome(String pkg, String homePkg) {
+        return pkg.equals(homePkg) || pkg.equals(packageOf(GOOGLE_HOME));
+    }
+
     private static String packageOf(String component) {
         if (component == null || component.isEmpty()) return null;
         int slash = component.indexOf('/');
@@ -1069,13 +1253,20 @@ final class HomeMode {
     // MARK: - Measurements (without opening apps: memory and the home button)
 
     /** A failed measurement only logs: the switch itself went through (or is about to), and a TV may cut it short
-     *  (a TCL's TGuard kills the job once the original launcher is in front, and the error read as a failed switch, #277). */
+     *  (a TCL's TGuard kills the job once the original launcher is in front, and the error read as a failed switch, #277).
+     *  The memory after the timing (the home screen just in front, as Free My TV's is when it's measured), but on its
+     *  own: a timing that fails no longer leaves both memory rows empty. */
     private static void measure(Context c, Adb adb, String mode, boolean memory) {
         try {
             measureHomeTime(c, adb, mode);
-            if (memory) measureMemory(c, adb, mode);
         } catch (Exception e) {
             AppLog.w("measurement of " + mode + " failed: " + e.getMessage());
+        }
+        if (!memory) return;
+        try {
+            measureMemory(c, adb, mode);
+        } catch (Exception e) {
+            AppLog.w("memory measurement of " + mode + " failed: " + e.getMessage());
         }
     }
 
@@ -1095,11 +1286,24 @@ final class HomeMode {
         putMetric(c, mode, "homeMs", samples.get(samples.size() / 2));
     }
 
-    /** Two minutes after a switch (the home screen settled, caches trimmed). */
+    /**
+     * Two minutes after a switch (the home screen settled, caches trimmed), and again when the settings close without
+     * it. Only with that home screen in front: behind another app it's trimmed, and with the settings in front their
+     * memory would count as our home screen's. Not in front within ten minutes of the switch: again in a minute.
+     */
     static void measureMemoryNow(Context c, String mode) {
         synchronized (RUN) {
-            if (!mode.equals(state(c).optString("mode"))) return;
+            JSONObject s = state(c);
+            if (!mode.equals(s.optString("mode"))) return;
             try (Adb adb = Adb.connect(c, 10_000, null)) {
+                String homePkg = packageOf(originalHome(s));   // dumpsys names an activity as "package/.Class"
+                String front = FREE.equals(mode) ? PKG + "/.HomeActivity" : homePkg == null ? null : homePkg + "/";
+                if (front != null && !adb.shell("dumpsys activity activities | grep ResumedActivity").contains(front)) {
+                    boolean again = System.currentTimeMillis() - s.optLong("since") < 600_000;
+                    AppLog.w("memory of " + mode + " not measured: its home screen isn't in front" + (again ? ", again in a minute" : ""));
+                    if (again) ModeJob.schedule(c, ModeJob.MEMORY, mode, 60_000);
+                    return;
+                }
                 measureMemory(c, adb, mode);
             } catch (Exception e) {
                 AppLog.w("memory measurement failed: " + e.getMessage());
@@ -1114,7 +1318,8 @@ final class HomeMode {
         String home = packageOf(originalHome(state(c)));
         String[] processes = FREE.equals(mode) ? new String[] {PKG + ":home"}
                 : home == null ? new String[0] : new String[] {home, home + ":coreservices"};
-        Pattern total = Pattern.compile("TOTAL PSS:\\s+(\\d+)");
+        // "TOTAL PSS:" from Android 10, plain "TOTAL:" before (never "TOTAL SWAP PSS:" nor the table's "TOTAL" row).
+        Pattern total = Pattern.compile("TOTAL(?: PSS)?:\\s+(\\d+)");
         for (String p : processes) {
             Matcher m = total.matcher(adb.shell("dumpsys meminfo " + p));
             if (m.find()) pss += Long.parseLong(m.group(1));
