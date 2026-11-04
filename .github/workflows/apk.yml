@@ -1,0 +1,42 @@
+# Builds FreeMyTV.apk on demand without touching the repository's own CI: the run publishes the
+# APK that build.sh signed with its throwaway key plus out/aligned.apk, so it can be signed again
+# with the project's key before being installed on a TV.
+name: apk
+
+on:
+  push:
+    branches: [ci/apk]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: "Android SDK: build-tools 34 and android-34"
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$RUNNER_TEMP/sdk" \
+            "build-tools;34.0.0" "platforms;android-34" > /dev/null
+          echo "ANDROID_HOME=$RUNNER_TEMP/sdk" >> "$GITHUB_ENV"
+      - name: "Build generic (no config.properties, the city comes from the TV time zone)"
+        run: |
+          ./build.sh --generic
+          ls -l FreeMyTV.apk out/aligned.apk
+          sha256sum FreeMyTV.apk out/aligned.apk
+      - name: "Publish the APKs as a pre-release"
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: apk-${{ github.run_number }}-${{ github.run_attempt }}
+          name: "APK build ${{ github.run_number }} (${{ github.sha }})"
+          body: "FreeMyTV.apk signed with the build's throwaway key, and out/aligned.apk unsigned and aligned, both built from ${{ github.sha }} with ./build.sh --generic."
+          files: |
+            FreeMyTV.apk
+            out/aligned.apk
+          prerelease: true
